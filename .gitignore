@@ -108,3 +108,11 @@ Thumbs.db
 # Uncomment if previews should not be committed
 # /public/previews/*
 # !/public/previews/.gitkeep
+
+
+.claude
+CLAUDE.md
+PRD-new_backend.md
+PRD.md
+SPEC-new_backend.md
+SPEC.md
