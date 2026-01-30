@@ -170,3 +170,29 @@ export function createBlobUrl(data: Uint8Array, mimeType: string): string {
   const blob = new Blob([data as BlobPart], { type: mimeType });
   return URL.createObjectURL(blob);
 }
+
+export function calculateSceneDurationsFromBeats(
+  beats: number[],
+  beatsPerScene: number,
+  sceneCount: number,
+  audioDuration: number
+): number[] {
+  const durations: number[] = [];
+
+  for (let i = 0; i < sceneCount; i++) {
+    const beatIndex = i * beatsPerScene;
+    const startBeat = beats[beatIndex];
+    const endBeat = beats[beatIndex + beatsPerScene];
+
+    if (startBeat === undefined) break;
+
+    // If no end beat, use audio duration as fallback
+    const duration = endBeat !== undefined
+      ? endBeat - startBeat
+      : audioDuration - startBeat;
+
+    durations.push(duration);
+  }
+
+  return durations;
+}

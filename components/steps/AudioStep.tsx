@@ -3,7 +3,8 @@
 import { useCallback, useState, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { useAppStore } from '@/stores/app-store';
-import { detectBpm, getAudioBufferFromFile, getAudioDuration } from '@/lib/audio/bpm-detector';
+import { detectBpm, trackBeats, getAudioBufferFromFile, getAudioDuration } from '@/lib/audio/bpm-detector';
+import type { SyncMode } from '@/stores/app-store';
 import { formatDuration, formatFileSize } from '@/lib/utils/helpers';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -19,6 +20,10 @@ export function AudioStep() {
     setBeatOffset,
     audioDuration,
     setAudioDuration,
+    beats,
+    setBeats,
+    syncMode,
+    setSyncMode,
     falApiKey,
     setFalApiKey,
     aspectRatio,
@@ -28,6 +33,7 @@ export function AudioStep() {
   } = useAppStore();
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isTrackingBeats, setIsTrackingBeats] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [mounted, setMounted] = useState(false);
@@ -40,7 +46,7 @@ export function AudioStep() {
     }
   }, [falApiKey]);
 
-  const analyzeAudio = async (file: File) => {
+  const analyzeAudio = async (file: File, mode: SyncMode = syncMode) => {
     setIsAnalyzing(true);
     setError(null);
 
@@ -49,9 +55,21 @@ export function AudioStep() {
       const duration = getAudioDuration(audioBuffer);
       setAudioDuration(duration);
 
-      const { bpm: detectedBpm, offset } = await detectBpm(audioBuffer);
-      setBpm(detectedBpm);
-      setBeatOffset(offset);
+      if (mode === 'beat') {
+        setIsTrackingBeats(true);
+        const detectedBeats = await trackBeats(audioBuffer);
+        setBeats(detectedBeats);
+        // Also detect BPM for display purposes
+        const { bpm: detectedBpm, offset } = await detectBpm(audioBuffer);
+        setBpm(detectedBpm);
+        setBeatOffset(offset);
+        setIsTrackingBeats(false);
+      } else {
+        const { bpm: detectedBpm, offset } = await detectBpm(audioBuffer);
+        setBpm(detectedBpm);
+        setBeatOffset(offset);
+        setBeats(null);
+      }
 
       const url = URL.createObjectURL(file);
       setAudioUrl(url);
@@ -59,9 +77,10 @@ export function AudioStep() {
       setError(err instanceof Error ? err.message : 'Failed to analyze audio');
       setBpm(null);
       setBeatOffset(0);
-      setAudioDuration(null);
+      setBeats(null);
     } finally {
       setIsAnalyzing(false);
+      setIsTrackingBeats(false);
     }
   };
 
@@ -97,6 +116,13 @@ export function AudioStep() {
     if (apiKeyInput.trim()) {
       setFalApiKey(apiKeyInput.trim());
       initFalClient(apiKeyInput.trim());
+    }
+  };
+
+  const handleSyncModeChange = async (mode: SyncMode) => {
+    setSyncMode(mode);
+    if (audioFile) {
+      await analyzeAudio(audioFile, mode);
     }
   };
 
@@ -277,6 +303,83 @@ export function AudioStep() {
                   Your visuals will sync to <span className="font-mono text-[var(--yellow)]">{bpm} BPM</span>.
                   Each beat lasts <span className="font-mono text-[var(--ink)]">{(60 / bpm).toFixed(2)}s</span>.
                 </p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Sync Mode Selection */}
+          {bpm && (
+            <Card variant="default" className="mt-4 animate-slide-up">
+              <CardContent>
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-10 h-10 bg-[var(--orange)] flex items-center justify-center">
+                    <svg className="w-5 h-5 text-[var(--ink)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="font-display text-lg uppercase tracking-wider text-[var(--ink)]">Sync Mode</h3>
+                    <p className="text-xs text-[var(--text-muted)]">Choose how scenes sync to music</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <button
+                    onClick={() => handleSyncModeChange('bpm')}
+                    disabled={isAnalyzing}
+                    className={`
+                      relative p-4 border-2 transition-all duration-150 text-left
+                      ${syncMode === 'bpm'
+                        ? 'border-[var(--cyan)] bg-[var(--cyan-soft)] shadow-[4px_4px_0_var(--cyan)]'
+                        : 'border-[var(--ink)] hover:border-[var(--cyan)]'
+                      }
+                    `}
+                  >
+                    <p className={`font-display text-xl uppercase tracking-wider mb-1 ${syncMode === 'bpm' ? 'text-[var(--cyan)]' : 'text-[var(--ink)]'}`}>
+                      BPM
+                    </p>
+                    <p className="text-xs text-[var(--text-muted)]">
+                      Constant rhythm. Best for electronic, pop, or tracks with steady tempo.
+                    </p>
+                    <span className="absolute top-2 right-2 text-xs font-mono text-[var(--text-muted)]">Default</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleSyncModeChange('beat')}
+                    disabled={isAnalyzing}
+                    className={`
+                      relative p-4 border-2 transition-all duration-150 text-left
+                      ${syncMode === 'beat'
+                        ? 'border-[var(--orange)] bg-[var(--orange-soft)] shadow-[4px_4px_0_var(--orange)]'
+                        : 'border-[var(--ink)] hover:border-[var(--orange)]'
+                      }
+                    `}
+                  >
+                    <p className={`font-display text-xl uppercase tracking-wider mb-1 ${syncMode === 'beat' ? 'text-[var(--orange)]' : 'text-[var(--ink)]'}`}>
+                      Beat Tracking
+                    </p>
+                    <p className="text-xs text-[var(--text-muted)]">
+                      Dynamic rhythm. Best for jazz, rock, live performances, or variable tempo.
+                    </p>
+                    <span className="absolute top-2 right-2 text-xs font-mono text-[var(--orange)]">Advanced</span>
+                  </button>
+                </div>
+
+                {isTrackingBeats && (
+                  <div className="flex items-center gap-3 mt-4 p-3 border-2 border-[var(--ink)] bg-[var(--paper-dark)]">
+                    <div className="w-6 h-6 border-2 border-[var(--ink)] border-t-transparent animate-spin" />
+                    <span className="text-sm text-[var(--text-secondary)]">Analyzing beats... This may take a moment.</span>
+                  </div>
+                )}
+
+                {syncMode === 'beat' && beats && (
+                  <div className="mt-4 p-3 bg-[var(--orange-soft)] border-2 border-[var(--orange)]">
+                    <p className="text-sm text-[var(--text-secondary)]">
+                      <span className="font-mono text-[var(--orange)]">{beats.length}</span> beats detected.
+                      Scene cuts will sync to actual beat positions.
+                    </p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}

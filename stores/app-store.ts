@@ -3,6 +3,7 @@ import { create } from 'zustand';
 export type Step = 'audio' | 'style' | 'story' | 'generate' | 'export';
 export type AspectRatio = '16:9' | '1:1' | '9:16';
 export type BeatsPerScene = 1 | 2;
+export type SyncMode = 'bpm' | 'beat';
 
 export interface Scene {
   id: string;
@@ -34,11 +35,15 @@ export interface AppState {
   bpm: number | null;
   beatOffset: number; // Time in seconds when first beat occurs
   audioDuration: number | null;
+  beats: number[] | null;
+  syncMode: SyncMode;
   setAudioFile: (file: File | null) => void;
   setAudioUrl: (url: string | null) => void;
   setBpm: (bpm: number | null) => void;
   setBeatOffset: (offset: number) => void;
   setAudioDuration: (duration: number | null) => void;
+  setBeats: (beats: number[] | null) => void;
+  setSyncMode: (mode: SyncMode) => void;
 
   // Video Settings
   aspectRatio: AspectRatio;
@@ -87,6 +92,8 @@ const initialState = {
   bpm: null,
   beatOffset: 0,
   audioDuration: null,
+  beats: null,
+  syncMode: 'bpm' as SyncMode,
   aspectRatio: '16:9' as AspectRatio,
   beatsPerScene: 1 as BeatsPerScene,
   selectedStyle: null,
@@ -127,6 +134,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   setBpm: (bpm) => set({ bpm }),
   setBeatOffset: (offset) => set({ beatOffset: offset }),
   setAudioDuration: (duration) => set({ audioDuration: duration }),
+  setBeats: (beats) => set({ beats }),
+  setSyncMode: (mode) => set({ syncMode: mode }),
 
   setAspectRatio: (ratio) => set({ aspectRatio: ratio }),
   setBeatsPerScene: (beats) => set({ beatsPerScene: beats }),

@@ -1,6 +1,7 @@
 'use client';
 
 import { analyze, guess } from 'web-audio-beat-detector';
+import { Essentia, EssentiaWASM } from 'essentia.js';
 
 export interface BpmResult {
   bpm: number;
@@ -26,6 +27,20 @@ export async function detectBpm(audioBuffer: AudioBuffer): Promise<BpmResult> {
     bpm: Math.round(bpm),
     offset: offset,
   };
+}
+
+export async function trackBeats(audioBuffer: AudioBuffer): Promise<number[]> {
+  const essentia = new Essentia(EssentiaWASM);
+
+  // Convert AudioBuffer to mono Float32Array
+  const audioData = audioBuffer.getChannelData(0);
+  const audioVector = essentia.arrayToVector(audioData);
+
+  // Run beat tracking algorithm
+  const result = essentia.BeatTrackerMultiFeature(audioVector, audioBuffer.sampleRate);
+  const beats = essentia.vectorToArray(result.ticks);
+
+  return beats;
 }
 
 export async function getAudioBufferFromFile(file: File): Promise<AudioBuffer> {

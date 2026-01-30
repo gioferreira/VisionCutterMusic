@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useAppStore } from '@/stores/app-store';
-import { loadFFmpeg } from '@/lib/ffmpeg/processor';
+import { loadFFmpeg, calculateSceneDurationsFromBeats } from '@/lib/ffmpeg/processor';
 import { Card, CardContent, Button, Progress } from '@/components/ui';
 import { fetchFile } from '@ffmpeg/util';
 
@@ -22,6 +22,9 @@ export function ExportStep() {
     beatsPerScene,
     setBeatsPerScene,
     aspectRatio,
+    beats,
+    syncMode,
+    audioDuration,
   } = useAppStore();
 
   const [ffmpegLoaded, setFfmpegLoaded] = useState(false);
@@ -66,13 +69,28 @@ export function ExportStep() {
       setCurrentTask('Adjusting video speeds...');
       const processedFiles: string[] = [];
 
-      // Calculate target duration for each scene based on BPM
-      const targetDuration = (60 / bpm) * beatsPerScene;
+      // Calculate durations based on sync mode
+      let sceneDurations: number[];
+
+      if (syncMode === 'beat' && beats && beats.length > 0) {
+        // Beat tracking mode: variable durations
+        sceneDurations = calculateSceneDurationsFromBeats(
+          beats,
+          beatsPerScene,
+          videoReadyScenes.length,
+          audioDuration || 0
+        );
+      } else {
+        // BPM mode: constant duration
+        const constantDuration = (60 / bpm) * beatsPerScene;
+        sceneDurations = videoReadyScenes.map(() => constantDuration);
+      }
 
       for (let i = 0; i < videoReadyScenes.length; i++) {
         const scene = videoReadyScenes[i];
         if (!scene.videoUrl) continue;
 
+        const targetDuration = sceneDurations[i] || (60 / bpm) * beatsPerScene;
         const outputName = `processed_${i}.mp4`;
         const videoData = await fetchFile(scene.videoUrl);
         await ffmpeg.writeFile(`input_${i}.mp4`, videoData);
@@ -110,7 +128,7 @@ export function ExportStep() {
       ]);
 
       // Calculate expected total duration
-      const expectedTotalDuration = targetDuration * videoReadyScenes.length;
+      const expectedTotalDuration = sceneDurations.reduce((sum, d) => sum + d, 0);
 
       // Adjust final video to exact duration (fix any FPS drift)
       setCurrentTask('Adjusting timing...');
@@ -197,8 +215,22 @@ export function ExportStep() {
     setIsPlaying(!isPlaying);
   };
 
-  const sceneDuration = bpm ? (60 / bpm) * beatsPerScene : 0;
-  const totalDuration = sceneDuration * videoReadyScenes.length;
+  // Calculate total duration based on sync mode
+  let totalDuration: number;
+  let sceneDuration: number;
+  if (syncMode === 'beat' && beats && beats.length > 0 && audioDuration) {
+    const sceneDurations = calculateSceneDurationsFromBeats(
+      beats,
+      beatsPerScene,
+      videoReadyScenes.length,
+      audioDuration
+    );
+    totalDuration = sceneDurations.reduce((sum, d) => sum + d, 0);
+    sceneDuration = sceneDurations.length > 0 ? sceneDurations[0] : 0;
+  } else {
+    sceneDuration = bpm ? (60 / bpm) * beatsPerScene : 0;
+    totalDuration = sceneDuration * videoReadyScenes.length;
+  }
 
   // Format duration as mm:ss
   const formatTime = (seconds: number) => {
@@ -263,7 +295,7 @@ export function ExportStep() {
             <h3 className="font-display text-xl uppercase tracking-wider text-[var(--ink)]">Export Settings</h3>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
             <div className="p-4 border-2 border-[var(--red)] shadow-[4px_4px_0_var(--red)] bg-[var(--red-soft)]">
               <p className="text-xs font-mono uppercase tracking-wider text-[var(--text-muted)] mb-1">BPM</p>
               <p className="font-display text-4xl text-[var(--red)]">{bpm || '--'}</p>
@@ -275,8 +307,15 @@ export function ExportStep() {
             </div>
 
             <div className="p-4 border-2 border-[var(--orange)] shadow-[4px_4px_0_var(--orange)] bg-[var(--orange-soft)]">
+              <p className="text-xs font-mono uppercase tracking-wider text-[var(--text-muted)] mb-1">Sync</p>
+              <p className="font-display text-2xl text-[var(--orange)]">
+                {syncMode === 'beat' ? 'Beat' : 'BPM'}
+              </p>
+            </div>
+
+            <div className="p-4 border-2 border-[var(--ink)] shadow-[4px_4px_0_var(--ink)] bg-[var(--paper-dark)]">
               <p className="text-xs font-mono uppercase tracking-wider text-[var(--text-muted)] mb-1">Format</p>
-              <p className="font-display text-3xl text-[var(--orange)]">{aspectRatio}</p>
+              <p className="font-display text-3xl text-[var(--ink)]">{aspectRatio}</p>
             </div>
 
             <div className="p-4 border-2 border-[var(--ink)] shadow-[4px_4px_0_var(--ink)]">
@@ -284,19 +323,19 @@ export function ExportStep() {
                 Beats/Scene
               </label>
               <div className="flex gap-2">
-                {([1, 2] as const).map((beats) => (
+                {([1, 2] as const).map((b) => (
                   <button
-                    key={beats}
-                    onClick={() => setBeatsPerScene(beats)}
+                    key={b}
+                    onClick={() => setBeatsPerScene(b)}
                     className={`
                       font-display text-3xl px-4 py-1 border-2 transition-all
-                      ${beatsPerScene === beats
+                      ${beatsPerScene === b
                         ? 'bg-[var(--cyan)] border-[var(--cyan)] text-[var(--ink)]'
                         : 'border-[var(--ink)] text-[var(--ink)] hover:bg-[var(--paper-dark)]'
                       }
                     `}
                   >
-                    {beats}
+                    {b}
                   </button>
                 ))}
               </div>
@@ -314,15 +353,30 @@ export function ExportStep() {
           </div>
 
           <div className="mt-4 p-3 bg-[var(--paper-dark)] border-2 border-[var(--ink)]">
-            <p className="text-sm text-[var(--text-secondary)] font-mono">
-              <span className="text-[var(--cyan)]">{videoReadyScenes.length}</span> scenes ×
-              <span className="text-[var(--red)]"> {sceneDuration.toFixed(3)}s</span> per scene =
-              <span className="text-[var(--yellow)]"> {formatTime(totalDuration)}</span> total
-            </p>
-            {bpm && (
-              <p className="text-xs text-[var(--text-muted)] mt-1">
-                {bpm} BPM → 1 beat = {(60/bpm).toFixed(3)}s → {beatsPerScene} beat{beatsPerScene > 1 ? 's' : ''} = {sceneDuration.toFixed(3)}s
-              </p>
+            {syncMode === 'beat' && beats ? (
+              <>
+                <p className="text-sm text-[var(--text-secondary)] font-mono">
+                  <span className="text-[var(--cyan)]">{videoReadyScenes.length}</span> scenes synced to
+                  <span className="text-[var(--orange)]"> {beats.length}</span> beats =
+                  <span className="text-[var(--yellow)]"> {formatTime(totalDuration)}</span> total
+                </p>
+                <p className="text-xs text-[var(--text-muted)] mt-1">
+                  Beat tracking mode: variable scene durations based on actual beat positions
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-[var(--text-secondary)] font-mono">
+                  <span className="text-[var(--cyan)]">{videoReadyScenes.length}</span> scenes ×
+                  <span className="text-[var(--red)]"> {sceneDuration.toFixed(3)}s</span> per scene =
+                  <span className="text-[var(--yellow)]"> {formatTime(totalDuration)}</span> total
+                </p>
+                {bpm && (
+                  <p className="text-xs text-[var(--text-muted)] mt-1">
+                    {bpm} BPM → 1 beat = {(60/bpm).toFixed(3)}s → {beatsPerScene} beat{beatsPerScene > 1 ? 's' : ''} = {sceneDuration.toFixed(3)}s
+                  </p>
+                )}
+              </>
             )}
           </div>
         </CardContent>
