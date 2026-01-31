@@ -3,7 +3,7 @@
 import { ButtonHTMLAttributes, forwardRef } from 'react';
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary' | 'ghost' | 'red' | 'cyan';
+  variant?: 'primary' | 'secondary' | 'ghost' | 'red' | 'cyan' | 'orange';
   size?: 'sm' | 'md' | 'lg';
   isLoading?: boolean;
   glow?: boolean;
@@ -48,6 +48,13 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         hover:bg-[var(--ink)] hover:text-[var(--paper)] hover:border-[var(--ink)]
         hover:-translate-x-0.5 hover:-translate-y-0.5
         hover:shadow-[4px_4px_0_var(--cyan)]
+        active:translate-x-0 active:translate-y-0 active:shadow-none
+      `,
+      orange: `
+        bg-[var(--orange)] text-[var(--ink)] border-[var(--orange)]
+        hover:bg-[var(--ink)] hover:text-[var(--paper)] hover:border-[var(--ink)]
+        hover:-translate-x-0.5 hover:-translate-y-0.5
+        hover:shadow-[4px_4px_0_var(--orange)]
         active:translate-x-0 active:translate-y-0 active:shadow-none
       `,
     };

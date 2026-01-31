@@ -2,8 +2,10 @@ import { create } from 'zustand';
 
 export type Step = 'audio' | 'style' | 'story' | 'generate' | 'export';
 export type AspectRatio = '16:9' | '1:1' | '9:16';
-export type BeatsPerScene = 1 | 2;
+export type BeatsPerScene = number; // 1, 2, 3, 4, 5, etc.
 export type SyncMode = 'bpm' | 'beat';
+export type BackendType = 'fal' | 'local';
+export type LocalConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
 export interface Scene {
   id: string;
@@ -73,6 +75,14 @@ export interface AppState {
   falApiKey: string | null;
   setFalApiKey: (key: string | null) => void;
 
+  // Backend Selection
+  backendType: BackendType;
+  localApiAddress: string;
+  localConnectionStatus: LocalConnectionStatus;
+  setBackendType: (type: BackendType) => void;
+  setLocalApiAddress: (address: string) => void;
+  setLocalConnectionStatus: (status: LocalConnectionStatus) => void;
+
   // Export
   finalVideoUrl: string | null;
   setFinalVideoUrl: (url: string | null) => void;
@@ -101,6 +111,9 @@ const initialState = {
   isGenerating: false,
   generationProgress: 0,
   falApiKey: typeof window !== 'undefined' ? localStorage.getItem('fal-api-key') : null,
+  backendType: (typeof window !== 'undefined' ? localStorage.getItem('backend-type') as BackendType : null) || 'fal',
+  localApiAddress: (typeof window !== 'undefined' ? localStorage.getItem('local-api-address') : null) || '127.0.0.1:8188',
+  localConnectionStatus: 'disconnected' as LocalConnectionStatus,
   finalVideoUrl: null,
   isExporting: false,
   exportProgress: 0,
@@ -187,6 +200,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     set({ falApiKey: key });
   },
+
+  setBackendType: (type) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('backend-type', type);
+    }
+    set({ backendType: type });
+  },
+
+  setLocalApiAddress: (address) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('local-api-address', address);
+    }
+    set({ localApiAddress: address });
+  },
+
+  setLocalConnectionStatus: (status) => set({ localConnectionStatus: status }),
 
   setFinalVideoUrl: (url) => set({ finalVideoUrl: url }),
   setIsExporting: (isExporting) => set({ isExporting }),

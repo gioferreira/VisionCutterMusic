@@ -318,27 +318,24 @@ export function ExportStep() {
               <p className="font-display text-3xl text-[var(--ink)]">{aspectRatio}</p>
             </div>
 
-            <div className="p-4 border-2 border-[var(--ink)] shadow-[4px_4px_0_var(--ink)]">
-              <label className="text-xs font-mono uppercase tracking-wider text-[var(--text-muted)] mb-1 block">
-                Beats/Scene
-              </label>
-              <div className="flex gap-2">
-                {([1, 2] as const).map((b) => (
-                  <button
-                    key={b}
-                    onClick={() => setBeatsPerScene(b)}
-                    className={`
-                      font-display text-3xl px-4 py-1 border-2 transition-all
-                      ${beatsPerScene === b
-                        ? 'bg-[var(--cyan)] border-[var(--cyan)] text-[var(--ink)]'
-                        : 'border-[var(--ink)] text-[var(--ink)] hover:bg-[var(--paper-dark)]'
-                      }
-                    `}
-                  >
-                    {b}
-                  </button>
-                ))}
-              </div>
+            <div className="p-4 border-2 border-[var(--cyan)] shadow-[4px_4px_0_var(--cyan)] bg-[var(--cyan-soft)]">
+              <p className="text-xs font-mono uppercase tracking-wider text-[var(--text-muted)] mb-1">Beats/Scene</p>
+              <input
+                type="number"
+                min="1"
+                max="32"
+                value={beatsPerScene}
+                onChange={(e) => {
+                  const value = parseInt(e.target.value, 10);
+                  if (value >= 1 && value <= 32) {
+                    setBeatsPerScene(value);
+                  }
+                }}
+                className="
+                  w-full font-display text-4xl text-[var(--cyan)] text-center bg-transparent border-none outline-none
+                  [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none
+                "
+              />
             </div>
 
             <div className="p-4 border-2 border-[var(--yellow)] shadow-[4px_4px_0_var(--yellow)] bg-[var(--yellow-soft)]">

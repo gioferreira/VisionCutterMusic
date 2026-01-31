@@ -19,12 +19,27 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useAppStore } from '@/stores/app-store';
-import { initFalClient, generateImage, generateVideo } from '@/lib/fal/client';
+import { initFalClient } from '@/lib/fal/client';
+import {
+  generateImage,
+  generateVideo,
+  getBackendCostInfo,
+  isBackendReady,
+  type GenerationConfig,
+} from '@/lib/generation';
 import { Card, CardContent, Button, Progress } from '@/components/ui';
 
-// FAL.ai pricing for Grok Imagine
-const COST_PER_IMAGE = 0.02; // $0.02 per image
-const COST_PER_VIDEO = 0.052; // $0.05 per second + $0.002 for image input = $0.052 for 1s video
+// Default FAL.ai pricing for Grok Imagine (used when backend is FAL)
+const DEFAULT_COST_PER_IMAGE = 0.02; // $0.02 per image
+const DEFAULT_COST_PER_VIDEO = 0.052; // $0.05 per second + $0.002 for image input = $0.052 for 1s video
+
+// Proxy external URLs, but not data URLs or local URLs
+function getProxiedUrl(url: string): string {
+  if (url.startsWith('data:') || url.startsWith('/') || url.startsWith('blob:')) {
+    return url;
+  }
+  return `/api/proxy?url=${encodeURIComponent(url)}`;
+}
 
 interface SortableImageCardProps {
   scene: {
@@ -66,8 +81,6 @@ function SortableImageCard({
   const hasImage = scene.status !== 'pending' && scene.status !== 'generating-image' && scene.imageUrl && !imageError;
   const hasVideo = scene.status === 'video-ready' && scene.videoUrl;
   const hasError = scene.status === 'error' || imageError;
-
-  const getProxiedUrl = (url: string) => `/api/proxy?url=${encodeURIComponent(url)}`;
 
   return (
     <div ref={setNodeRef} style={style}>
@@ -237,7 +250,54 @@ export function GenerateStep() {
     generationProgress,
     setGenerationProgress,
     aspectRatio,
+    backendType,
+    localApiAddress,
+    localConnectionStatus,
+    bpm,
+    beatsPerScene,
+    beats,
+    syncMode,
   } = useAppStore();
+
+  // Build generation config from store state
+  const generationConfig: GenerationConfig = {
+    backendType,
+    falApiKey,
+    localApiAddress,
+    aspectRatio,
+  };
+
+  // Get backend-specific cost info
+  const costInfo = getBackendCostInfo(backendType);
+  const COST_PER_IMAGE = costInfo?.imageCost ?? DEFAULT_COST_PER_IMAGE;
+  const COST_PER_VIDEO = costInfo?.videoCost ?? DEFAULT_COST_PER_VIDEO;
+
+  // Check if backend is ready
+  const backendReady = isBackendReady(generationConfig);
+
+  // Calculate target duration for videos based on sync mode
+  const getTargetDuration = (sceneIndex: number): number => {
+    if (syncMode === 'beat' && beats && beats.length > 0) {
+      // Use actual beat positions
+      const startBeatIndex = sceneIndex * beatsPerScene;
+      const endBeatIndex = startBeatIndex + beatsPerScene;
+
+      if (endBeatIndex < beats.length) {
+        return beats[endBeatIndex] - beats[startBeatIndex];
+      }
+      // For last scene, use average beat duration
+      const avgBeatDuration = beats[beats.length - 1] / (beats.length - 1);
+      return avgBeatDuration * beatsPerScene;
+    }
+
+    // Use BPM-based calculation
+    if (bpm) {
+      return (60 / bpm) * beatsPerScene;
+    }
+
+    // Fallback
+    return 1;
+  };
 
   const [showCostConfirm, setShowCostConfirm] = useState<'images' | 'videos' | null>(null);
   const [showAnimatePopup, setShowAnimatePopup] = useState(false);
@@ -275,7 +335,7 @@ export function GenerateStep() {
 
     try {
       const fullPrompt = scene.prompt + selectedStyle.suffix;
-      const result = await generateImage(fullPrompt, aspectRatio);
+      const result = await generateImage(fullPrompt, generationConfig);
       updateScene(sceneId, {
         status: 'image-ready',
         imageUrl: result.imageUrl,
@@ -292,12 +352,16 @@ export function GenerateStep() {
     const scene = scenes.find((s) => s.id === sceneId);
     if (!scene || !scene.imageUrl) return;
 
+    const sceneIndex = scenes.findIndex((s) => s.id === sceneId);
+
     updateScene(sceneId, { status: 'generating-video', error: undefined });
 
     try {
       // Use scene prompt for motion description
       const motionPrompt = `subtle cinematic motion, gentle camera movement, ${scene.prompt}`;
-      const result = await generateVideo(scene.imageUrl, motionPrompt);
+      // Calculate target duration for this specific scene
+      const targetDuration = getTargetDuration(sceneIndex);
+      const result = await generateVideo(scene.imageUrl, motionPrompt, generationConfig, targetDuration);
       updateScene(sceneId, {
         status: 'video-ready',
         videoUrl: result.videoUrl,
@@ -310,7 +374,8 @@ export function GenerateStep() {
     }
   };
 
-  const CONCURRENCY_LIMIT = 5;
+  // FAL.ai can handle parallel requests, ComfyUI processes sequentially
+  const CONCURRENCY_LIMIT = backendType === 'fal' ? 5 : 1;
 
   // Pool-based concurrency: always keeps CONCURRENCY_LIMIT tasks running
   const runWithPool = async <T,>(
@@ -341,7 +406,7 @@ export function GenerateStep() {
   };
 
   const generateAllImages = async () => {
-    if (!falApiKey) return;
+    if (!backendReady) return;
 
     setIsGenerating(true);
     setGenerationProgress(0);
@@ -367,7 +432,7 @@ export function GenerateStep() {
   };
 
   const generateAllVideos = async () => {
-    if (!falApiKey) return;
+    if (!backendReady) return;
 
     setIsGenerating(true);
     setGenerationProgress(0);
@@ -432,25 +497,34 @@ export function GenerateStep() {
       <Card variant="default" className="mb-8 animate-slide-up">
         <CardContent className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            {falApiKey ? (
-              <span className="flex items-center gap-2 text-sm text-[var(--cyan)] font-mono uppercase tracking-wider">
+            {backendReady ? (
+              <span className={`flex items-center gap-2 text-sm font-mono uppercase tracking-wider ${
+                backendType === 'fal' ? 'text-[var(--cyan)]' : 'text-[var(--orange)]'
+              }`}>
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
-                API Connected
+                {backendType === 'fal' ? 'FAL.ai Connected' : 'ComfyUI Ready'}
               </span>
             ) : (
               <span className="text-sm text-[var(--red)] font-mono uppercase tracking-wider">
-                Add API key in Audio step
+                {backendType === 'fal' ? 'Add API key in Audio step' : 'Connect ComfyUI in Audio step'}
+              </span>
+            )}
+
+            {/* Free badge for local backend */}
+            {backendType === 'local' && backendReady && (
+              <span className="px-2 py-1 text-xs font-mono uppercase tracking-wider bg-[var(--cyan)] text-[var(--ink)]">
+                Free
               </span>
             )}
           </div>
 
           <div className="flex flex-col sm:flex-row gap-3">
             <Button
-              variant="red"
+              variant={backendType === 'fal' ? 'red' : 'orange'}
               onClick={handleGenerateImages}
-              disabled={isGenerating || pendingCount === 0 || !falApiKey}
+              disabled={isGenerating || pendingCount === 0 || !backendReady}
               isLoading={isGenerating}
               className="gap-2"
             >
@@ -462,7 +536,7 @@ export function GenerateStep() {
 
             <Button
               onClick={handleGenerateVideos}
-              disabled={isGenerating || imageReadyCount === 0 || !falApiKey}
+              disabled={isGenerating || imageReadyCount === 0 || !backendReady}
               isLoading={isGenerating}
               variant="cyan"
               className="gap-2"
@@ -477,38 +551,73 @@ export function GenerateStep() {
       </Card>
 
       {/* Model & Cost Info */}
-      <Card variant="yellow" className="mb-8 animate-slide-up">
-        <CardContent className="py-4">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-[var(--yellow)] flex items-center justify-center flex-shrink-0">
-                <svg className="w-5 h-5 text-[var(--ink)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
+      {backendType === 'fal' ? (
+        <Card variant="yellow" className="mb-8 animate-slide-up">
+          <CardContent className="py-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-[var(--yellow)] flex items-center justify-center flex-shrink-0">
+                  <svg className="w-5 h-5 text-[var(--ink)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="font-display text-sm uppercase tracking-wider text-[var(--ink)]">Powered by xAI Grok Imagine</p>
+                  <p className="text-xs text-[var(--text-muted)]">Images & videos generated via FAL.ai API</p>
+                </div>
               </div>
-              <div>
-                <p className="font-display text-sm uppercase tracking-wider text-[var(--ink)]">Powered by xAI Grok Imagine</p>
-                <p className="text-xs text-[var(--text-muted)]">Images & videos generated via FAL.ai API</p>
-              </div>
-            </div>
 
-            <div className="flex items-center gap-6 text-sm">
-              <div className="text-center">
-                <p className="font-mono text-xs text-[var(--text-muted)] uppercase">Image</p>
-                <p className="font-display text-lg text-[var(--ink)]">${COST_PER_IMAGE.toFixed(2)}</p>
-              </div>
-              <div className="text-center">
-                <p className="font-mono text-xs text-[var(--text-muted)] uppercase">Video (1s)</p>
-                <p className="font-display text-lg text-[var(--ink)]">${COST_PER_VIDEO.toFixed(2)}</p>
-              </div>
-              <div className="text-center border-l-2 border-[var(--ink)] pl-6">
-                <p className="font-mono text-xs text-[var(--text-muted)] uppercase">Est. Total</p>
-                <p className="font-display text-lg text-[var(--red)]">${totalEstimatedCost.toFixed(2)}</p>
+              <div className="flex items-center gap-6 text-sm">
+                <div className="text-center">
+                  <p className="font-mono text-xs text-[var(--text-muted)] uppercase">Image</p>
+                  <p className="font-display text-lg text-[var(--ink)]">${COST_PER_IMAGE.toFixed(2)}</p>
+                </div>
+                <div className="text-center">
+                  <p className="font-mono text-xs text-[var(--text-muted)] uppercase">Video (1s)</p>
+                  <p className="font-display text-lg text-[var(--ink)]">${COST_PER_VIDEO.toFixed(2)}</p>
+                </div>
+                <div className="text-center border-l-2 border-[var(--ink)] pl-6">
+                  <p className="font-mono text-xs text-[var(--text-muted)] uppercase">Est. Total</p>
+                  <p className="font-display text-lg text-[var(--red)]">${totalEstimatedCost.toFixed(2)}</p>
+                </div>
               </div>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card variant="cyan" className="mb-8 animate-slide-up">
+          <CardContent className="py-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-[var(--cyan)] flex items-center justify-center flex-shrink-0">
+                  <svg className="w-5 h-5 text-[var(--ink)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="font-display text-sm uppercase tracking-wider text-[var(--ink)]">Self-Hosted ComfyUI</p>
+                  <p className="text-xs text-[var(--text-muted)]">FLUX 2 Klein (T2I) + LTX-2 (I2V)</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-6 text-sm">
+                <div className="text-center">
+                  <p className="font-mono text-xs text-[var(--text-muted)] uppercase">Image</p>
+                  <p className="font-display text-lg text-[var(--cyan)]">FREE</p>
+                </div>
+                <div className="text-center">
+                  <p className="font-mono text-xs text-[var(--text-muted)] uppercase">Video</p>
+                  <p className="font-display text-lg text-[var(--cyan)]">FREE</p>
+                </div>
+                <div className="text-center border-l-2 border-[var(--ink)] pl-6">
+                  <p className="font-mono text-xs text-[var(--text-muted)] uppercase">Est. Total</p>
+                  <p className="font-display text-lg text-[var(--cyan)]">$0.00</p>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Cost Confirmation Modal */}
       {showCostConfirm && (
@@ -521,16 +630,26 @@ export function GenerateStep() {
           <div className="relative w-full max-w-md bg-[var(--paper)] border-2 border-[var(--ink)] shadow-[8px_8px_0_var(--ink)] animate-scale-in">
             <div className="p-6">
               <div className="flex items-center gap-3 mb-6">
-                <div className="w-12 h-12 bg-[var(--yellow)] flex items-center justify-center">
-                  <svg className="w-6 h-6 text-[var(--ink)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
+                <div className={`w-12 h-12 flex items-center justify-center ${
+                  backendType === 'fal' ? 'bg-[var(--yellow)]' : 'bg-[var(--cyan)]'
+                }`}>
+                  {backendType === 'fal' ? (
+                    <svg className="w-6 h-6 text-[var(--ink)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-6 h-6 text-[var(--ink)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                  )}
                 </div>
                 <div>
                   <h3 className="font-display text-2xl uppercase tracking-wider text-[var(--ink)]">
                     Confirm Generation
                   </h3>
-                  <p className="text-sm text-[var(--text-muted)]">This will use your FAL.ai credits</p>
+                  <p className="text-sm text-[var(--text-muted)]">
+                    {backendType === 'fal' ? 'This will use your FAL.ai credits' : 'Running on your local ComfyUI'}
+                  </p>
                 </div>
               </div>
 
@@ -545,16 +664,23 @@ export function GenerateStep() {
                 </div>
                 <div className="flex justify-between items-center pt-3 border-t-2 border-[var(--ink)]">
                   <span className="font-mono text-sm uppercase tracking-wider text-[var(--text-secondary)]">
-                    Estimated cost
+                    {backendType === 'fal' ? 'Estimated cost' : 'Cost'}
                   </span>
-                  <span className="font-display text-3xl text-[var(--red)]">
-                    ${showCostConfirm === 'images' ? imageCost.toFixed(2) : videoCost.toFixed(2)}
+                  <span className={`font-display text-3xl ${backendType === 'fal' ? 'text-[var(--red)]' : 'text-[var(--cyan)]'}`}>
+                    {backendType === 'fal'
+                      ? `$${showCostConfirm === 'images' ? imageCost.toFixed(2) : videoCost.toFixed(2)}`
+                      : 'FREE'
+                    }
                   </span>
                 </div>
               </div>
 
               <p className="text-xs text-[var(--text-muted)] mb-6 text-center">
-                Using <span className="font-mono text-[var(--ink)]">xai/grok-imagine{showCostConfirm === 'videos' ? '-video' : ''}</span> model via FAL.ai
+                {backendType === 'fal' ? (
+                  <>Using <span className="font-mono text-[var(--ink)]">xai/grok-imagine{showCostConfirm === 'videos' ? '-video' : ''}</span> model via FAL.ai</>
+                ) : (
+                  <>Using <span className="font-mono text-[var(--ink)]">{showCostConfirm === 'images' ? 'FLUX 2 Klein' : 'LTX-2'}</span> on local ComfyUI</>
+                )}
               </p>
 
               <div className="flex gap-3">
@@ -566,7 +692,7 @@ export function GenerateStep() {
                   Cancel
                 </Button>
                 <Button
-                  variant="red"
+                  variant={backendType === 'fal' ? 'red' : 'orange'}
                   onClick={confirmGeneration}
                   className="flex-1"
                 >
@@ -586,7 +712,9 @@ export function GenerateStep() {
             onClick={() => setShowAnimatePopup(false)}
           />
 
-          <div className="relative w-full max-w-lg bg-[var(--paper)] border-2 border-[var(--ink)] shadow-[8px_8px_0_var(--red)] animate-scale-in">
+          <div className={`relative w-full max-w-lg bg-[var(--paper)] border-2 border-[var(--ink)] animate-scale-in ${
+            backendType === 'fal' ? 'shadow-[8px_8px_0_var(--red)]' : 'shadow-[8px_8px_0_var(--orange)]'
+          }`}>
             <div className="p-8 text-center">
               {/* Success Icon */}
               <div className="w-20 h-20 bg-[var(--cyan)] mx-auto mb-6 flex items-center justify-center">
@@ -609,10 +737,10 @@ export function GenerateStep() {
               <div className="bg-[var(--paper-dark)] border-2 border-[var(--ink)] p-4 mb-6">
                 <div className="flex justify-between items-center">
                   <span className="font-mono text-sm uppercase tracking-wider text-[var(--text-secondary)]">
-                    Estimated cost for {imageReadyCount} videos
+                    {backendType === 'fal' ? `Estimated cost for ${imageReadyCount} videos` : `Generate ${imageReadyCount} videos`}
                   </span>
-                  <span className="font-display text-2xl text-[var(--red)]">
-                    ${videoCost.toFixed(2)}
+                  <span className={`font-display text-2xl ${backendType === 'fal' ? 'text-[var(--red)]' : 'text-[var(--cyan)]'}`}>
+                    {backendType === 'fal' ? `$${videoCost.toFixed(2)}` : 'FREE'}
                   </span>
                 </div>
               </div>
@@ -626,7 +754,7 @@ export function GenerateStep() {
                   Maybe Later
                 </Button>
                 <Button
-                  variant="red"
+                  variant={backendType === 'fal' ? 'red' : 'orange'}
                   onClick={() => {
                     setShowAnimatePopup(false);
                     setShowCostConfirm('videos');
@@ -668,13 +796,13 @@ export function GenerateStep() {
             <div className="bg-[var(--ink)] border-2 border-[var(--ink)] shadow-[8px_8px_0_var(--red)]">
               {previewMedia.type === 'image' ? (
                 <img
-                  src={`/api/proxy?url=${encodeURIComponent(previewMedia.url)}`}
+                  src={getProxiedUrl(previewMedia.url)}
                   alt={previewMedia.prompt}
                   className="w-full h-auto max-h-[75vh] object-contain"
                 />
               ) : (
                 <video
-                  src={`/api/proxy?url=${encodeURIComponent(previewMedia.url)}`}
+                  src={getProxiedUrl(previewMedia.url)}
                   controls
                   autoPlay
                   loop
