@@ -1,6 +1,6 @@
 'use client';
 
-import type { AspectRatio, BackendType } from '@/stores/app-store';
+import type { AspectRatio, BackendType, T2IModel, I2VModel } from '@/stores/app-store';
 import { initFalClient, generateImage as falGenerateImage, generateVideo as falGenerateVideo } from '@/lib/fal/client';
 import { getComfyUIClient, initComfyUIClient } from '@/lib/comfyui/client';
 import { hydrateT2IWorkflow, hydrateI2VWorkflow } from '@/lib/comfyui/workflows';
@@ -11,6 +11,8 @@ export interface GenerationConfig {
   falApiKey?: string | null;
   localApiAddress?: string;
   aspectRatio: AspectRatio;
+  t2iModel?: T2IModel;
+  i2vModel?: I2VModel;
 }
 
 export interface T2IResult {
@@ -125,6 +127,7 @@ async function generateImageWithComfyUI(
   const workflow = hydrateT2IWorkflow({
     prompt,
     aspectRatio: config.aspectRatio,
+    model: config.t2iModel || 'flux-klein',
   });
 
   console.log('[ComfyUI] Queuing T2I prompt...');
@@ -201,6 +204,8 @@ async function generateVideoWithComfyUI(
     inputImageFilename: uploadResult.name,
     motionPrompt,
     targetDuration,
+    model: config.i2vModel || 'ltx-2',
+    aspectRatio: config.aspectRatio,
   };
   console.log('[ComfyUI] I2V params:', i2vParams);
 

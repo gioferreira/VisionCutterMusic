@@ -6,6 +6,8 @@ export type BeatsPerScene = number; // 1, 2, 3, 4, 5, etc.
 export type SyncMode = 'bpm' | 'beat';
 export type BackendType = 'fal' | 'local';
 export type LocalConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+export type T2IModel = 'flux-klein' | 'z-image';
+export type I2VModel = 'ltx-2' | 'wan-2.2';
 
 export interface Scene {
   id: string;
@@ -83,6 +85,12 @@ export interface AppState {
   setLocalApiAddress: (address: string) => void;
   setLocalConnectionStatus: (status: LocalConnectionStatus) => void;
 
+  // Model Selection (ComfyUI)
+  t2iModel: T2IModel;
+  i2vModel: I2VModel;
+  setT2IModel: (model: T2IModel) => void;
+  setI2VModel: (model: I2VModel) => void;
+
   // Export
   finalVideoUrl: string | null;
   setFinalVideoUrl: (url: string | null) => void;
@@ -114,6 +122,8 @@ const initialState = {
   backendType: (typeof window !== 'undefined' ? localStorage.getItem('backend-type') as BackendType : null) || 'fal',
   localApiAddress: (typeof window !== 'undefined' ? localStorage.getItem('local-api-address') : null) || '127.0.0.1:8188',
   localConnectionStatus: 'disconnected' as LocalConnectionStatus,
+  t2iModel: (typeof window !== 'undefined' ? localStorage.getItem('t2i-model') as T2IModel : null) || 'flux-klein',
+  i2vModel: (typeof window !== 'undefined' ? localStorage.getItem('i2v-model') as I2VModel : null) || 'ltx-2',
   finalVideoUrl: null,
   isExporting: false,
   exportProgress: 0,
@@ -216,6 +226,20 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setLocalConnectionStatus: (status) => set({ localConnectionStatus: status }),
+
+  setT2IModel: (model) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('t2i-model', model);
+    }
+    set({ t2iModel: model });
+  },
+
+  setI2VModel: (model) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('i2v-model', model);
+    }
+    set({ i2vModel: model });
+  },
 
   setFinalVideoUrl: (url) => set({ finalVideoUrl: url }),
   setIsExporting: (isExporting) => set({ isExporting }),

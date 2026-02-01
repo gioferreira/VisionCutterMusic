@@ -4,7 +4,7 @@ import { useCallback, useState, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { useAppStore } from '@/stores/app-store';
 import { detectBpm, trackBeats, getAudioBufferFromFile, getAudioDuration } from '@/lib/audio/bpm-detector';
-import type { SyncMode, BackendType } from '@/stores/app-store';
+import type { SyncMode, BackendType, T2IModel, I2VModel } from '@/stores/app-store';
 import { formatDuration, formatFileSize } from '@/lib/utils/helpers';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -37,6 +37,10 @@ export function AudioStep() {
     setLocalApiAddress,
     localConnectionStatus,
     setLocalConnectionStatus,
+    t2iModel,
+    i2vModel,
+    setT2IModel,
+    setI2VModel,
   } = useAppStore();
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -732,11 +736,51 @@ export function AudioStep() {
                 </div>
               )}
 
+              {/* Model Selection */}
+              <div className="mt-6 pt-6 border-t-2 border-[var(--ink)]">
+                <h4 className="font-mono text-sm uppercase tracking-wider text-[var(--text-secondary)] mb-4">
+                  Model Selection
+                </h4>
+
+                <div className="grid grid-cols-2 gap-4">
+                  {/* T2I Model Selector */}
+                  <div>
+                    <label className="block text-xs font-mono uppercase tracking-wider text-[var(--text-muted)] mb-2">
+                      Text-to-Image
+                    </label>
+                    <select
+                      value={t2iModel}
+                      onChange={(e) => setT2IModel(e.target.value as T2IModel)}
+                      className="w-full px-3 py-2 border-2 border-[var(--ink)] bg-[var(--paper)] text-[var(--text-primary)] font-mono text-sm focus:outline-none focus:border-[var(--orange)] cursor-pointer"
+                    >
+                      <option value="flux-klein">FLUX 2 Klein</option>
+                      <option value="z-image">Z-Image</option>
+                    </select>
+                  </div>
+
+                  {/* I2V Model Selector */}
+                  <div>
+                    <label className="block text-xs font-mono uppercase tracking-wider text-[var(--text-muted)] mb-2">
+                      Image-to-Video
+                    </label>
+                    <select
+                      value={i2vModel}
+                      onChange={(e) => setI2VModel(e.target.value as I2VModel)}
+                      className="w-full px-3 py-2 border-2 border-[var(--ink)] bg-[var(--paper)] text-[var(--text-primary)] font-mono text-sm focus:outline-none focus:border-[var(--orange)] cursor-pointer"
+                    >
+                      <option value="ltx-2">LTX-2 (25fps)</option>
+                      <option value="wan-2.2">Wan2.2 (16fps)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <p className="text-xs text-[var(--text-muted)] mt-3">
+                  Selected models must be installed in your ComfyUI instance.
+                </p>
+              </div>
+
               {/* ComfyUI Setup Info */}
               <div className="mt-4 p-3 bg-[var(--paper-dark)] border-2 border-[var(--ink)]">
-                <p className="text-xs text-[var(--text-muted)] mb-2">
-                  <span className="font-mono text-[var(--orange)]">Requirements:</span> ComfyUI with FLUX 2 Klein (T2I) and LTX-2 (I2V) models installed.
-                </p>
                 <p className="text-xs text-[var(--text-muted)] mb-2">
                   For remote servers, start ComfyUI with: <span className="font-mono text-[var(--ink)]">--enable-cors-header --listen 0.0.0.0</span>
                 </p>

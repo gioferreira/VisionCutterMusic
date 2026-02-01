@@ -257,6 +257,8 @@ export function GenerateStep() {
     beatsPerScene,
     beats,
     syncMode,
+    t2iModel,
+    i2vModel,
   } = useAppStore();
 
   // Build generation config from store state
@@ -265,6 +267,8 @@ export function GenerateStep() {
     falApiKey,
     localApiAddress,
     aspectRatio,
+    t2iModel,
+    i2vModel,
   };
 
   // Get backend-specific cost info
@@ -596,7 +600,9 @@ export function GenerateStep() {
                 </div>
                 <div>
                   <p className="font-display text-sm uppercase tracking-wider text-[var(--ink)]">Self-Hosted ComfyUI</p>
-                  <p className="text-xs text-[var(--text-muted)]">FLUX 2 Klein (T2I) + LTX-2 (I2V)</p>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    {t2iModel === 'flux-klein' ? 'FLUX 2 Klein' : 'Z-Image'} (T2I) + {i2vModel === 'ltx-2' ? 'LTX-2' : 'Wan2.2'} (I2V)
+                  </p>
                 </div>
               </div>
 
@@ -679,7 +685,7 @@ export function GenerateStep() {
                 {backendType === 'fal' ? (
                   <>Using <span className="font-mono text-[var(--ink)]">xai/grok-imagine{showCostConfirm === 'videos' ? '-video' : ''}</span> model via FAL.ai</>
                 ) : (
-                  <>Using <span className="font-mono text-[var(--ink)]">{showCostConfirm === 'images' ? 'FLUX 2 Klein' : 'LTX-2'}</span> on local ComfyUI</>
+                  <>Using <span className="font-mono text-[var(--ink)]">{showCostConfirm === 'images' ? (t2iModel === 'flux-klein' ? 'FLUX 2 Klein' : 'Z-Image') : (i2vModel === 'ltx-2' ? 'LTX-2' : 'Wan2.2')}</span> on local ComfyUI</>
                 )}
               </p>
 

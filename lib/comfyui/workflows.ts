@@ -1,14 +1,19 @@
 'use client';
 
 import type { ComfyUIWorkflow } from './types';
-import type { AspectRatio } from '@/stores/app-store';
+import type { AspectRatio, T2IModel, I2VModel } from '@/stores/app-store';
 
-// Import workflow templates
-import t2iWorkflowTemplate from '@/workflows/t2i_workflow_api.json';
-import i2vWorkflowTemplate from '@/workflows/i2v_workflow_api.json';
+// Import all workflow templates
+import t2iKleinWorkflow from '@/workflows/t2i_workflow_Klein_api.json';
+import t2iZimageWorkflow from '@/workflows/t2i_zimage_workflow_api.json';
+import i2vLtx2Workflow from '@/workflows/i2v_workflow_LTX-2_api.json';
+import i2vWan22Workflow from '@/workflows/i2v-wan2.2default_workflow_api.json';
 
-// T2I Node IDs for FLUX 2 Klein workflow
-const T2I_NODES = {
+// =============================================================================
+// T2I Node ID Mappings
+// =============================================================================
+
+const T2I_KLEIN_NODES = {
   POSITIVE_PROMPT: '76',      // PrimitiveStringMultiline - inputs.value
   NEGATIVE_PROMPT: '75:67',   // CLIPTextEncode - inputs.text
   SEED: '75:73',              // RandomNoise - inputs.noise_seed
@@ -16,21 +21,58 @@ const T2I_NODES = {
   HEIGHT: '75:69',            // PrimitiveInt - inputs.value
 };
 
-// I2V Node IDs for LTX-2 workflow
-const I2V_NODES = {
+const T2I_ZIMAGE_NODES = {
+  POSITIVE_PROMPT: '67',      // CLIPTextEncode - inputs.text
+  NEGATIVE_PROMPT: '71',      // CLIPTextEncode - inputs.text
+  SEED: '69',                 // KSampler - inputs.seed
+  IMAGE_SIZE: '68',           // EmptySD3LatentImage - inputs.width, inputs.height
+};
+
+// =============================================================================
+// I2V Node ID Mappings
+// =============================================================================
+
+const I2V_LTX2_NODES = {
   INPUT_IMAGE: '98',          // LoadImage - inputs.image
   POSITIVE_PROMPT: '92:3',    // CLIPTextEncode - inputs.text
-  NEGATIVE_PROMPT: '92:4',    // CLIPTextEncode - inputs.text (has good defaults)
+  NEGATIVE_PROMPT: '92:4',    // CLIPTextEncode - inputs.text
   SEED: '92:11',              // RandomNoise - inputs.noise_seed
   FRAMES: '92:62',            // PrimitiveInt - inputs.value
 };
 
-// LTX-2 frame rate
-const LTX_FPS = 25;
+const I2V_WAN22_NODES = {
+  INPUT_IMAGE: '97',          // LoadImage - inputs.image
+  POSITIVE_PROMPT: '93',      // CLIPTextEncode - inputs.text
+  NEGATIVE_PROMPT: '89',      // CLIPTextEncode - inputs.text
+  SEED: '86',                 // KSamplerAdvanced - inputs.noise_seed
+  VIDEO_CONFIG: '98',         // WanImageToVideo - inputs.width, inputs.height, inputs.length
+};
+
+// =============================================================================
+// Model-specific Settings
+// =============================================================================
+
+const I2V_FPS: Record<I2VModel, number> = {
+  'ltx-2': 25,
+  'wan-2.2': 16,
+};
+
+const T2I_SAVE_NODE: Record<T2IModel, string> = {
+  'flux-klein': '9',
+  'z-image': '9',
+};
+
+const I2V_SAVE_NODE: Record<I2VModel, string> = {
+  'ltx-2': '75',
+  'wan-2.2': '108',
+};
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
 
 /**
  * Get pixel dimensions for aspect ratio
- * Returns dimensions that work well with FLUX 2 Klein
  */
 export function getImageDimensions(aspectRatio: AspectRatio): { width: number; height: number } {
   switch (aspectRatio) {
@@ -47,116 +89,239 @@ export function getImageDimensions(aspectRatio: AspectRatio): { width: number; h
 
 /**
  * Calculate frame count from target duration
- * @param targetDuration Duration in seconds
- * @returns Frame count for LTX-2 (25fps)
  */
-export function calculateFrameCount(targetDuration: number): number {
-  // LTX-2 runs at 25fps
-  // Add 1 for the first frame (image-to-video starts with the input image)
-  return Math.round(targetDuration * LTX_FPS) + 1;
+export function calculateFrameCount(targetDuration: number, model: I2VModel): number {
+  const fps = I2V_FPS[model];
+  return Math.round(targetDuration * fps) + 1;
 }
+
+/**
+ * Get FPS for a model
+ */
+export function getModelFps(model: I2VModel): number {
+  return I2V_FPS[model];
+}
+
+/**
+ * Get the SaveImage node ID for T2I workflow
+ */
+export function getT2ISaveNodeId(model: T2IModel): string {
+  return T2I_SAVE_NODE[model];
+}
+
+/**
+ * Get the SaveVideo node ID for I2V workflow
+ */
+export function getI2VSaveNodeId(model: I2VModel): string {
+  return I2V_SAVE_NODE[model];
+}
+
+// =============================================================================
+// T2I Workflow Hydration
+// =============================================================================
 
 export interface T2IParams {
   prompt: string;
   negativePrompt?: string;
   seed?: number;
   aspectRatio: AspectRatio;
+  model: T2IModel;
 }
 
 /**
  * Hydrate the T2I workflow with dynamic parameters
  */
 export function hydrateT2IWorkflow(params: T2IParams): ComfyUIWorkflow {
-  // Deep clone the template
-  const workflow = JSON.parse(JSON.stringify(t2iWorkflowTemplate)) as ComfyUIWorkflow;
-
   const { width, height } = getImageDimensions(params.aspectRatio);
   const seed = params.seed ?? Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
 
-  // Set positive prompt
-  if (workflow[T2I_NODES.POSITIVE_PROMPT]) {
-    workflow[T2I_NODES.POSITIVE_PROMPT].inputs.value = params.prompt;
+  if (params.model === 'flux-klein') {
+    return hydrateT2IKlein(params.prompt, params.negativePrompt, seed, width, height);
+  } else {
+    return hydrateT2IZimage(params.prompt, params.negativePrompt, seed, width, height);
+  }
+}
+
+function hydrateT2IKlein(
+  prompt: string,
+  negativePrompt: string | undefined,
+  seed: number,
+  width: number,
+  height: number
+): ComfyUIWorkflow {
+  const workflow = JSON.parse(JSON.stringify(t2iKleinWorkflow)) as ComfyUIWorkflow;
+  const nodes = T2I_KLEIN_NODES;
+
+  // Set positive prompt (PrimitiveStringMultiline uses 'value')
+  if (workflow[nodes.POSITIVE_PROMPT]) {
+    workflow[nodes.POSITIVE_PROMPT].inputs.value = prompt;
   }
 
-  // Set negative prompt (optional)
-  if (params.negativePrompt && workflow[T2I_NODES.NEGATIVE_PROMPT]) {
-    workflow[T2I_NODES.NEGATIVE_PROMPT].inputs.text = params.negativePrompt;
+  // Set negative prompt (CLIPTextEncode uses 'text')
+  if (negativePrompt && workflow[nodes.NEGATIVE_PROMPT]) {
+    workflow[nodes.NEGATIVE_PROMPT].inputs.text = negativePrompt;
   }
 
-  // Set seed
-  if (workflow[T2I_NODES.SEED]) {
-    workflow[T2I_NODES.SEED].inputs.noise_seed = seed;
+  // Set seed (RandomNoise uses 'noise_seed')
+  if (workflow[nodes.SEED]) {
+    workflow[nodes.SEED].inputs.noise_seed = seed;
   }
 
-  // Set dimensions
-  if (workflow[T2I_NODES.WIDTH]) {
-    workflow[T2I_NODES.WIDTH].inputs.value = width;
+  // Set dimensions (PrimitiveInt uses 'value')
+  if (workflow[nodes.WIDTH]) {
+    workflow[nodes.WIDTH].inputs.value = width;
   }
-  if (workflow[T2I_NODES.HEIGHT]) {
-    workflow[T2I_NODES.HEIGHT].inputs.value = height;
+  if (workflow[nodes.HEIGHT]) {
+    workflow[nodes.HEIGHT].inputs.value = height;
   }
 
   return workflow;
 }
+
+function hydrateT2IZimage(
+  prompt: string,
+  negativePrompt: string | undefined,
+  seed: number,
+  width: number,
+  height: number
+): ComfyUIWorkflow {
+  const workflow = JSON.parse(JSON.stringify(t2iZimageWorkflow)) as ComfyUIWorkflow;
+  const nodes = T2I_ZIMAGE_NODES;
+
+  // Set positive prompt (CLIPTextEncode uses 'text')
+  if (workflow[nodes.POSITIVE_PROMPT]) {
+    workflow[nodes.POSITIVE_PROMPT].inputs.text = prompt;
+  }
+
+  // Set negative prompt
+  if (negativePrompt && workflow[nodes.NEGATIVE_PROMPT]) {
+    workflow[nodes.NEGATIVE_PROMPT].inputs.text = negativePrompt;
+  }
+
+  // Set seed (KSampler uses 'seed')
+  if (workflow[nodes.SEED]) {
+    workflow[nodes.SEED].inputs.seed = seed;
+  }
+
+  // Set dimensions (EmptySD3LatentImage uses direct width/height)
+  if (workflow[nodes.IMAGE_SIZE]) {
+    workflow[nodes.IMAGE_SIZE].inputs.width = width;
+    workflow[nodes.IMAGE_SIZE].inputs.height = height;
+  }
+
+  return workflow;
+}
+
+// =============================================================================
+// I2V Workflow Hydration
+// =============================================================================
 
 export interface I2VParams {
   inputImageFilename: string;
   motionPrompt: string;
   negativePrompt?: string;
   seed?: number;
-  targetDuration: number; // Duration in seconds
+  targetDuration: number;
+  model: I2VModel;
+  aspectRatio?: AspectRatio; // For Wan2.2 which needs dimensions
 }
 
 /**
  * Hydrate the I2V workflow with dynamic parameters
  */
 export function hydrateI2VWorkflow(params: I2VParams): ComfyUIWorkflow {
-  // Deep clone the template
-  const workflow = JSON.parse(JSON.stringify(i2vWorkflowTemplate)) as ComfyUIWorkflow;
-
   const seed = params.seed ?? Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
-  const frames = calculateFrameCount(params.targetDuration);
+  const frames = calculateFrameCount(params.targetDuration, params.model);
+
+  console.log(`[ComfyUI] I2V workflow (${params.model}): ${params.targetDuration}s -> ${frames} frames @ ${I2V_FPS[params.model]}fps`);
+
+  if (params.model === 'ltx-2') {
+    return hydrateI2VLtx2(params.inputImageFilename, params.motionPrompt, params.negativePrompt, seed, frames);
+  } else {
+    return hydrateI2VWan22(params.inputImageFilename, params.motionPrompt, params.negativePrompt, seed, frames, params.aspectRatio);
+  }
+}
+
+function hydrateI2VLtx2(
+  inputImageFilename: string,
+  motionPrompt: string,
+  negativePrompt: string | undefined,
+  seed: number,
+  frames: number
+): ComfyUIWorkflow {
+  const workflow = JSON.parse(JSON.stringify(i2vLtx2Workflow)) as ComfyUIWorkflow;
+  const nodes = I2V_LTX2_NODES;
 
   // Set input image filename
-  if (workflow[I2V_NODES.INPUT_IMAGE]) {
-    workflow[I2V_NODES.INPUT_IMAGE].inputs.image = params.inputImageFilename;
+  if (workflow[nodes.INPUT_IMAGE]) {
+    workflow[nodes.INPUT_IMAGE].inputs.image = inputImageFilename;
   }
 
   // Set motion prompt
-  if (workflow[I2V_NODES.POSITIVE_PROMPT]) {
-    workflow[I2V_NODES.POSITIVE_PROMPT].inputs.text = params.motionPrompt;
+  if (workflow[nodes.POSITIVE_PROMPT]) {
+    workflow[nodes.POSITIVE_PROMPT].inputs.text = motionPrompt;
   }
 
-  // Set negative prompt (optional - workflow has good defaults)
-  if (params.negativePrompt && workflow[I2V_NODES.NEGATIVE_PROMPT]) {
-    workflow[I2V_NODES.NEGATIVE_PROMPT].inputs.text = params.negativePrompt;
+  // Set negative prompt
+  if (negativePrompt && workflow[nodes.NEGATIVE_PROMPT]) {
+    workflow[nodes.NEGATIVE_PROMPT].inputs.text = negativePrompt;
   }
 
-  // Set seed
-  if (workflow[I2V_NODES.SEED]) {
-    workflow[I2V_NODES.SEED].inputs.noise_seed = seed;
+  // Set seed (RandomNoise uses 'noise_seed')
+  if (workflow[nodes.SEED]) {
+    workflow[nodes.SEED].inputs.noise_seed = seed;
   }
 
-  // Set frame count (dynamic based on target duration)
-  if (workflow[I2V_NODES.FRAMES]) {
-    workflow[I2V_NODES.FRAMES].inputs.value = frames;
+  // Set frame count (PrimitiveInt uses 'value')
+  if (workflow[nodes.FRAMES]) {
+    workflow[nodes.FRAMES].inputs.value = frames;
   }
-
-  console.log(`[ComfyUI] I2V workflow: ${params.targetDuration}s -> ${frames} frames @ ${LTX_FPS}fps`);
 
   return workflow;
 }
 
-/**
- * Extract the save node ID for T2I workflow (for finding outputs)
- */
-export function getT2ISaveNodeId(): string {
-  return '9'; // SaveImage node
-}
+function hydrateI2VWan22(
+  inputImageFilename: string,
+  motionPrompt: string,
+  negativePrompt: string | undefined,
+  seed: number,
+  frames: number,
+  aspectRatio?: AspectRatio
+): ComfyUIWorkflow {
+  const workflow = JSON.parse(JSON.stringify(i2vWan22Workflow)) as ComfyUIWorkflow;
+  const nodes = I2V_WAN22_NODES;
 
-/**
- * Extract the save node ID for I2V workflow (for finding outputs)
- */
-export function getI2VSaveNodeId(): string {
-  return '75'; // SaveVideo node
+  // Set input image filename
+  if (workflow[nodes.INPUT_IMAGE]) {
+    workflow[nodes.INPUT_IMAGE].inputs.image = inputImageFilename;
+  }
+
+  // Set motion prompt
+  if (workflow[nodes.POSITIVE_PROMPT]) {
+    workflow[nodes.POSITIVE_PROMPT].inputs.text = motionPrompt;
+  }
+
+  // Set negative prompt (Wan2.2 has Chinese default, may want to override)
+  if (negativePrompt && workflow[nodes.NEGATIVE_PROMPT]) {
+    workflow[nodes.NEGATIVE_PROMPT].inputs.text = negativePrompt;
+  }
+
+  // Set seed (KSamplerAdvanced uses 'noise_seed')
+  if (workflow[nodes.SEED]) {
+    workflow[nodes.SEED].inputs.noise_seed = seed;
+  }
+
+  // Set video dimensions and length (WanImageToVideo node)
+  if (workflow[nodes.VIDEO_CONFIG]) {
+    workflow[nodes.VIDEO_CONFIG].inputs.length = frames;
+
+    // Optionally set dimensions if aspectRatio provided
+    if (aspectRatio) {
+      const { width, height } = getImageDimensions(aspectRatio);
+      workflow[nodes.VIDEO_CONFIG].inputs.width = width;
+      workflow[nodes.VIDEO_CONFIG].inputs.height = height;
+    }
+  }
+
+  return workflow;
 }
