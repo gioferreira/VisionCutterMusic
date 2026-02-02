@@ -95,10 +95,17 @@ export function ExportStep() {
         const videoData = await fetchFile(scene.videoUrl);
         await ffmpeg.writeFile(`input_${i}.mp4`, videoData);
 
-        // Our videos are 1 second long (we set duration: 1 in grok-imagine-video)
-        const originalDuration = 1;
+        // Use stored generatedDuration, fallback to 1.0s for FAL.ai videos
+        const originalDuration = scene.generatedDuration || 1.0;
+
         // pts > 1 = slower (stretch), pts < 1 = faster (compress)
         const pts = targetDuration / originalDuration;
+        const speedChangeRatio = originalDuration / targetDuration;
+
+        // Log significant speed changes
+        if (speedChangeRatio > 2 || speedChangeRatio < 0.5) {
+          console.warn(`[Export] Scene ${i}: significant speed change (${speedChangeRatio.toFixed(2)}x). Original: ${originalDuration.toFixed(2)}s, Target: ${targetDuration.toFixed(2)}s`);
+        }
 
         await ffmpeg.exec([
           '-i', `input_${i}.mp4`,
@@ -239,6 +246,41 @@ export function ExportStep() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Calculate speed warnings for export
+  const calculateSpeedWarnings = (): string[] => {
+    const warnings: string[] = [];
+
+    // Calculate target durations
+    let targetDurations: number[];
+    if (syncMode === 'beat' && beats && beats.length > 0 && audioDuration) {
+      targetDurations = calculateSceneDurationsFromBeats(
+        beats,
+        beatsPerScene,
+        videoReadyScenes.length,
+        audioDuration
+      );
+    } else {
+      const constantDuration = bpm ? (60 / bpm) * beatsPerScene : 1;
+      targetDurations = videoReadyScenes.map(() => constantDuration);
+    }
+
+    videoReadyScenes.forEach((scene, i) => {
+      const targetDuration = targetDurations[i] || 1;
+      const originalDuration = scene.generatedDuration || 1.0;
+      const speedChangeRatio = originalDuration / targetDuration;
+
+      if (speedChangeRatio > 2) {
+        warnings.push(`Scene ${i + 1}: Will be sped up ${speedChangeRatio.toFixed(1)}x (may look unnatural)`);
+      } else if (speedChangeRatio < 0.5) {
+        warnings.push(`Scene ${i + 1}: Will be slowed down ${(1/speedChangeRatio).toFixed(1)}x (may look choppy)`);
+      }
+    });
+
+    return warnings;
+  };
+
+  const speedWarnings = calculateSpeedWarnings();
+
   return (
     <div className="w-full max-w-4xl mx-auto px-4">
       <div className="text-center mb-12 animate-slide-up">
@@ -378,6 +420,32 @@ export function ExportStep() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Speed Change Warnings */}
+      {speedWarnings.length > 0 && (
+        <Card variant="yellow" className="mb-8 animate-fade-in">
+          <CardContent>
+            <div className="flex items-start gap-3">
+              <svg className="w-5 h-5 text-[var(--yellow)] flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <div>
+                <p className="font-mono text-sm uppercase tracking-wider text-[var(--yellow)] mb-2">
+                  Speed Adjustment Warning
+                </p>
+                <ul className="text-xs text-[var(--text-muted)] space-y-1">
+                  {speedWarnings.map((warning, i) => (
+                    <li key={i}>{warning}</li>
+                  ))}
+                </ul>
+                <p className="text-xs text-[var(--text-muted)] mt-3">
+                  Tip: Use &quot;Round to Second&quot; or &quot;Padding&quot; frame strategies to reduce speed changes.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Export Button */}
       <div className="flex justify-center mb-8">

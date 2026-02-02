@@ -10,7 +10,8 @@ import {
   hydrateCustomI2VWorkflow,
   getImageDimensions,
 } from '@/lib/comfyui/workflows';
-import type { GenerationProgress, ComfyUIWorkflow, T2IWorkflowMapping, I2VWorkflowMapping } from '@/lib/comfyui/types';
+import type { GenerationProgress, ComfyUIWorkflow, T2IWorkflowMapping, I2VWorkflowMapping, FrameStrategy } from '@/lib/comfyui/types';
+import { calculateFrameCount } from '@/lib/comfyui/workflows';
 
 export interface GenerationConfig {
   backendType: BackendType;
@@ -26,6 +27,9 @@ export interface GenerationConfig {
   customI2VWorkflow?: ComfyUIWorkflow | null;
   customI2VMapping?: I2VWorkflowMapping | null;
   customI2VFps?: number;
+  // Frame strategy (ComfyUI only)
+  frameStrategy?: FrameStrategy;
+  framePadding?: number;
 }
 
 export interface T2IResult {
@@ -34,6 +38,7 @@ export interface T2IResult {
 
 export interface I2VResult {
   videoUrl: string;
+  generatedDuration: number; // Actual duration of generated video in seconds
 }
 
 /**
@@ -103,7 +108,12 @@ async function generateVideoWithFal(
 
   initFalClient(config.falApiKey);
   const result = await falGenerateVideo(imageUrl, motionPrompt, onProgress);
-  return { videoUrl: result.videoUrl };
+
+  // FAL.ai always generates 1 second videos (API limitation)
+  return {
+    videoUrl: result.videoUrl,
+    generatedDuration: 1.0,
+  };
 }
 
 // ============================================================================
@@ -230,10 +240,21 @@ async function generateVideoWithComfyUI(
 
   // Hydrate the workflow based on mode
   let workflow: ComfyUIWorkflow;
+  let generatedDuration: number;
 
   if (config.workflowMode === 'custom' && config.customI2VWorkflow && config.customI2VMapping) {
     const fps = config.customI2VFps || 24;
-    const frames = Math.round(targetDuration * fps) + 1;
+
+    // Calculate frames using strategy
+    const { frames, actualDuration } = calculateFrameCount({
+      targetDuration,
+      fps,
+      strategy: config.frameStrategy || 'exact',
+      padding: config.framePadding,
+    });
+
+    generatedDuration = actualDuration;
+
     const { width, height } = getImageDimensions(config.aspectRatio);
 
     workflow = hydrateCustomI2VWorkflow({
@@ -246,17 +267,19 @@ async function generateVideoWithComfyUI(
       workflow: config.customI2VWorkflow,
       mapping: config.customI2VMapping,
     });
-    console.log(`[ComfyUI] Using custom I2V workflow: ${targetDuration}s -> ${frames} frames @ ${fps}fps`);
+    console.log(`[ComfyUI] Using custom I2V workflow: ${targetDuration}s target -> ${frames} frames @ ${fps}fps = ${generatedDuration.toFixed(3)}s actual`);
   } else {
-    const i2vParams = {
+    const { workflow: hydratedWorkflow, actualDuration } = hydrateI2VWorkflow({
       inputImageFilename: uploadResult.name,
       motionPrompt,
       targetDuration,
       model: config.i2vModel || 'ltx-2',
       aspectRatio: config.aspectRatio,
-    };
-    console.log('[ComfyUI] I2V params:', i2vParams);
-    workflow = hydrateI2VWorkflow(i2vParams);
+      frameStrategy: config.frameStrategy,
+      framePadding: config.framePadding,
+    });
+    workflow = hydratedWorkflow;
+    generatedDuration = actualDuration;
     console.log('[ComfyUI] Using preset I2V workflow:', config.i2vModel || 'ltx-2');
   }
 
@@ -285,7 +308,10 @@ async function generateVideoWithComfyUI(
   const videoUrl = await client.fetchOutputAsDataUrl(output.filename, output.subfolder, output.type);
   console.log('[ComfyUI] Video data URL created, length:', videoUrl.length);
 
-  return { videoUrl };
+  return {
+    videoUrl,
+    generatedDuration,
+  };
 }
 
 // ============================================================================

@@ -1,6 +1,6 @@
 'use client';
 
-import type { ComfyUIWorkflow, T2IWorkflowMapping, I2VWorkflowMapping } from './types';
+import type { ComfyUIWorkflow, T2IWorkflowMapping, I2VWorkflowMapping, FrameStrategy } from './types';
 import type { AspectRatio, T2IModel, I2VModel } from '@/stores/app-store';
 
 // Import all workflow templates
@@ -88,9 +88,58 @@ export function getImageDimensions(aspectRatio: AspectRatio): { width: number; h
 }
 
 /**
- * Calculate frame count from target duration
+ * Parameters for frame calculation
  */
-export function calculateFrameCount(targetDuration: number, model: I2VModel): number {
+export interface FrameCalculationParams {
+  targetDuration: number;
+  fps: number;
+  strategy: FrameStrategy;
+  padding?: number;
+}
+
+/**
+ * Calculate frame count based on strategy
+ * Returns both the calculated frames and the actual duration they represent
+ */
+export function calculateFrameCount(params: FrameCalculationParams): {
+  frames: number;
+  actualDuration: number;
+} {
+  const { targetDuration, fps, strategy, padding = 0 } = params;
+
+  // Base calculation
+  const baseFrames = Math.round(targetDuration * fps) + 1;
+
+  let frames: number;
+
+  switch (strategy) {
+    case 'round_second':
+      // Round up to nearest full second
+      const durationSeconds = Math.ceil(targetDuration);
+      frames = durationSeconds * fps + 1;
+      break;
+
+    case 'padding':
+      // Add extra frames for safety buffer
+      frames = baseFrames + padding;
+      break;
+
+    case 'exact':
+    default:
+      frames = baseFrames;
+      break;
+  }
+
+  // Calculate actual duration for these frames
+  const actualDuration = (frames - 1) / fps;
+
+  return { frames, actualDuration };
+}
+
+/**
+ * Simple frame count calculation (backward compatible)
+ */
+export function calculateFrameCountSimple(targetDuration: number, model: I2VModel): number {
   const fps = I2V_FPS[model];
   return Math.round(targetDuration * fps) + 1;
 }
@@ -224,22 +273,35 @@ export interface I2VParams {
   targetDuration: number;
   model: I2VModel;
   aspectRatio?: AspectRatio; // For Wan2.2 which needs dimensions
+  frameStrategy?: FrameStrategy;
+  framePadding?: number;
 }
 
 /**
  * Hydrate the I2V workflow with dynamic parameters
+ * Returns both the workflow and the actual duration of the generated video
  */
-export function hydrateI2VWorkflow(params: I2VParams): ComfyUIWorkflow {
+export function hydrateI2VWorkflow(params: I2VParams): { workflow: ComfyUIWorkflow; actualDuration: number } {
   const seed = params.seed ?? Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
-  const frames = calculateFrameCount(params.targetDuration, params.model);
+  const fps = I2V_FPS[params.model];
 
-  console.log(`[ComfyUI] I2V workflow (${params.model}): ${params.targetDuration}s -> ${frames} frames @ ${I2V_FPS[params.model]}fps`);
+  const { frames, actualDuration } = calculateFrameCount({
+    targetDuration: params.targetDuration,
+    fps,
+    strategy: params.frameStrategy || 'exact',
+    padding: params.framePadding,
+  });
 
+  console.log(`[ComfyUI] I2V workflow (${params.model}): ${params.targetDuration}s target -> ${frames} frames @ ${fps}fps = ${actualDuration.toFixed(3)}s actual`);
+
+  let workflow: ComfyUIWorkflow;
   if (params.model === 'ltx-2') {
-    return hydrateI2VLtx2(params.inputImageFilename, params.motionPrompt, params.negativePrompt, seed, frames);
+    workflow = hydrateI2VLtx2(params.inputImageFilename, params.motionPrompt, params.negativePrompt, seed, frames);
   } else {
-    return hydrateI2VWan22(params.inputImageFilename, params.motionPrompt, params.negativePrompt, seed, frames, params.aspectRatio);
+    workflow = hydrateI2VWan22(params.inputImageFilename, params.motionPrompt, params.negativePrompt, seed, frames, params.aspectRatio);
   }
+
+  return { workflow, actualDuration };
 }
 
 function hydrateI2VLtx2(

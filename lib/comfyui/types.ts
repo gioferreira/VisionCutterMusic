@@ -225,3 +225,9 @@ export interface CustomWorkflowConfig {
   i2vMapping: I2VWorkflowMapping | null;
   i2vFps: number; // User-specified or detected from workflow
 }
+
+// =============================================================================
+// Frame Strategy Types
+// =============================================================================
+
+export type FrameStrategy = 'exact' | 'round_second' | 'padding';

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { T2IWorkflowMapping, I2VWorkflowMapping } from '@/lib/comfyui/types';
+import type { T2IWorkflowMapping, I2VWorkflowMapping, FrameStrategy } from '@/lib/comfyui/types';
 
 export type Step = 'audio' | 'style' | 'story' | 'generate' | 'export';
 export type AspectRatio = '16:9' | '1:1' | '9:16';
@@ -18,6 +18,7 @@ export interface Scene {
   videoUrl?: string;
   status: 'pending' | 'generating-image' | 'image-ready' | 'generating-video' | 'video-ready' | 'error';
   error?: string;
+  generatedDuration?: number; // Actual duration of generated video in seconds
 }
 
 export interface StylePreset {
@@ -103,6 +104,12 @@ export interface AppState {
   setCustomI2VMapping: (mapping: I2VWorkflowMapping | null) => void;
   setCustomI2VFps: (fps: number) => void;
 
+  // Frame Strategy (ComfyUI only)
+  frameStrategy: FrameStrategy;
+  framePadding: number; // Extra frames when strategy is 'padding'
+  setFrameStrategy: (strategy: FrameStrategy) => void;
+  setFramePadding: (padding: number) => void;
+
   // Export
   finalVideoUrl: string | null;
   setFinalVideoUrl: (url: string | null) => void;
@@ -140,6 +147,8 @@ const initialState = {
   customT2IMapping: null,
   customI2VMapping: null,
   customI2VFps: (typeof window !== 'undefined' ? Number(localStorage.getItem('custom-i2v-fps')) : 0) || 24,
+  frameStrategy: (typeof window !== 'undefined' ? localStorage.getItem('frame-strategy') as FrameStrategy : null) || 'exact',
+  framePadding: (typeof window !== 'undefined' ? Number(localStorage.getItem('frame-padding')) : 0) || 0,
   finalVideoUrl: null,
   isExporting: false,
   exportProgress: 0,
@@ -277,6 +286,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       localStorage.setItem('custom-i2v-fps', String(fps));
     }
     set({ customI2VFps: fps });
+  },
+
+  setFrameStrategy: (strategy) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('frame-strategy', strategy);
+    }
+    set({ frameStrategy: strategy });
+  },
+
+  setFramePadding: (padding) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('frame-padding', String(padding));
+    }
+    set({ framePadding: padding });
   },
 
   setFinalVideoUrl: (url) => set({ finalVideoUrl: url }),

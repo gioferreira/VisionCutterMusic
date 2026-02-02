@@ -27,6 +27,7 @@ import {
   isBackendReady,
   type GenerationConfig,
 } from '@/lib/generation';
+import type { FrameStrategy } from '@/lib/comfyui/types';
 import { Card, CardContent, Button, Progress } from '@/components/ui';
 
 // Default FAL.ai pricing for Grok Imagine (used when backend is FAL)
@@ -263,6 +264,10 @@ export function GenerateStep() {
     customT2IMapping,
     customI2VMapping,
     customI2VFps,
+    frameStrategy,
+    framePadding,
+    setFrameStrategy,
+    setFramePadding,
   } = useAppStore();
 
   // Load custom workflows from localStorage if in custom mode
@@ -298,6 +303,8 @@ export function GenerateStep() {
     customI2VWorkflow,
     customI2VMapping,
     customI2VFps,
+    frameStrategy,
+    framePadding,
   };
 
   // Get backend-specific cost info
@@ -402,6 +409,7 @@ export function GenerateStep() {
       updateScene(sceneId, {
         status: 'video-ready',
         videoUrl: result.videoUrl,
+        generatedDuration: result.generatedDuration, // Store the actual duration
       });
     } catch (error) {
       updateScene(sceneId, {
@@ -663,6 +671,101 @@ export function GenerateStep() {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* Advanced Generation Settings - ComfyUI only */}
+      {backendType === 'local' && (
+        <Card variant="default" className="mb-8 animate-slide-up">
+          <CardContent>
+            <details>
+              <summary className="cursor-pointer flex items-center gap-3 select-none">
+                <div className="w-8 h-8 bg-[var(--ink)] flex items-center justify-center">
+                  <svg className="w-4 h-4 text-[var(--paper)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                  </svg>
+                </div>
+                <span className="font-display text-lg uppercase tracking-wider text-[var(--ink)]">
+                  Advanced Frame Settings
+                </span>
+              </summary>
+
+              <div className="mt-6 space-y-6">
+                {/* Strategy Selection */}
+                <div>
+                  <label className="block text-xs font-mono uppercase tracking-wider text-[var(--text-muted)] mb-3">
+                    Frame Strategy
+                  </label>
+                  <div className="grid grid-cols-3 gap-3">
+                    {[
+                      { value: 'exact', label: 'Exact Match', desc: 'Precise frame count' },
+                      { value: 'round_second', label: 'Round to Second', desc: 'Ensures full coverage' },
+                      { value: 'padding', label: 'Add Padding', desc: 'Extra safety frames' },
+                    ].map((option) => (
+                      <button
+                        key={option.value}
+                        onClick={() => setFrameStrategy(option.value as FrameStrategy)}
+                        className={`
+                          p-3 border-2 text-left transition-all
+                          ${frameStrategy === option.value
+                            ? 'border-[var(--cyan)] bg-[var(--cyan-soft)]'
+                            : 'border-[var(--ink)] hover:border-[var(--cyan)]'
+                          }
+                        `}
+                      >
+                        <p className={`font-mono text-sm uppercase tracking-wider ${frameStrategy === option.value ? 'text-[var(--cyan)]' : 'text-[var(--text-primary)]'}`}>
+                          {option.label}
+                        </p>
+                        <p className="text-xs text-[var(--text-muted)] mt-1">{option.desc}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Padding Input - only show when padding strategy selected */}
+                {frameStrategy === 'padding' && (
+                  <div className="animate-fade-in">
+                    <label className="block text-xs font-mono uppercase tracking-wider text-[var(--text-muted)] mb-2">
+                      Extra Frames
+                    </label>
+                    <div className="flex items-center gap-4">
+                      <input
+                        type="number"
+                        min={1}
+                        max={50}
+                        value={framePadding}
+                        onChange={(e) => setFramePadding(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                        className="w-24 px-3 py-2 border-2 border-[var(--ink)] bg-[var(--paper)] text-[var(--text-primary)] font-mono text-lg focus:outline-none focus:border-[var(--cyan)]"
+                      />
+                      <span className="text-sm text-[var(--text-muted)]">
+                        frames added to each video
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Strategy explanation */}
+                <div className="p-3 bg-[var(--paper-dark)] border-2 border-[var(--ink)] text-xs text-[var(--text-muted)]">
+                  {frameStrategy === 'exact' && (
+                    <p>Generates exactly the frames needed for beat duration. Best for tight sync.</p>
+                  )}
+                  {frameStrategy === 'round_second' && (
+                    <p>Rounds up to the nearest full second. Useful for ensuring no audio gaps.</p>
+                  )}
+                  {frameStrategy === 'padding' && (
+                    <p>Adds {framePadding} extra frames as a safety buffer for smoother transitions.</p>
+                  )}
+                </div>
+              </div>
+            </details>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* FAL.ai Frame Control Notice */}
+      {backendType === 'fal' && (
+        <div className="mb-8 p-3 bg-[var(--paper-dark)] border-2 border-[var(--ink)] text-xs text-[var(--text-muted)]">
+          <span className="text-[var(--yellow)]">Note:</span> Frame-level control is only available with ComfyUI backend. FAL.ai generates 1-second videos that are stretched/compressed at export.
+        </div>
       )}
 
       {/* Cost Confirmation Modal */}
