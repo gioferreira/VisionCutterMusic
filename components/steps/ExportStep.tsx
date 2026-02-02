@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useAppStore } from '@/stores/app-store';
-import { loadFFmpeg, calculateSceneDurationsFromBeats } from '@/lib/ffmpeg/processor';
+import { loadFFmpeg, calculateSceneDurationsFromBeats, applyClipFitting } from '@/lib/ffmpeg/processor';
+import type { ClipFittingMode } from '@/stores/app-store';
 import { Card, CardContent, Button, Progress } from '@/components/ui';
 import { fetchFile } from '@ffmpeg/util';
 
@@ -25,6 +26,8 @@ export function ExportStep() {
     beats,
     syncMode,
     audioDuration,
+    clipFittingMode,
+    setClipFittingMode,
   } = useAppStore();
 
   const [ffmpegLoaded, setFfmpegLoaded] = useState(false);
@@ -98,23 +101,14 @@ export function ExportStep() {
         // Use stored generatedDuration, fallback to 1.0s for FAL.ai videos
         const originalDuration = scene.generatedDuration || 1.0;
 
-        // pts > 1 = slower (stretch), pts < 1 = faster (compress)
-        const pts = targetDuration / originalDuration;
-        const speedChangeRatio = originalDuration / targetDuration;
-
-        // Log significant speed changes
-        if (speedChangeRatio > 2 || speedChangeRatio < 0.5) {
-          console.warn(`[Export] Scene ${i}: significant speed change (${speedChangeRatio.toFixed(2)}x). Original: ${originalDuration.toFixed(2)}s, Target: ${targetDuration.toFixed(2)}s`);
-        }
-
-        await ffmpeg.exec([
-          '-i', `input_${i}.mp4`,
-          '-filter:v', `setpts=${pts.toFixed(4)}*PTS`,
-          '-t', targetDuration.toFixed(4), // Explicitly set output duration
-          '-an',
-          '-y',
-          outputName,
-        ]);
+        // Apply clip fitting based on selected mode
+        await applyClipFitting(ffmpeg, {
+          inputFile: `input_${i}.mp4`,
+          outputFile: outputName,
+          originalDuration,
+          targetDuration,
+          mode: clipFittingMode,
+        });
 
         processedFiles.push(outputName);
         currentStep++;
@@ -246,8 +240,13 @@ export function ExportStep() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Calculate speed warnings for export
+  // Calculate speed warnings for export (only applies to stretch mode)
   const calculateSpeedWarnings = (): string[] => {
+    // Crop modes don't change speed, so no warnings needed
+    if (clipFittingMode !== 'stretch') {
+      return [];
+    }
+
     const warnings: string[] = [];
 
     // Calculate target durations
@@ -421,6 +420,132 @@ export function ExportStep() {
         </CardContent>
       </Card>
 
+      {/* Clip Fitting Mode */}
+      <Card variant="default" className="mb-8 animate-slide-up">
+        <CardContent>
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 bg-[var(--ink)] flex items-center justify-center">
+              <svg className="w-5 h-5 text-[var(--paper)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="font-display text-xl uppercase tracking-wider text-[var(--ink)]">Clip Fitting</h3>
+              <p className="text-xs text-[var(--text-muted)]">How to adjust clips that are longer than beat duration</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[
+              {
+                value: 'stretch',
+                label: 'Stretch',
+                desc: 'Adjust speed to fit',
+              },
+              {
+                value: 'crop_head',
+                label: 'Keep Start',
+                desc: 'Trim from end',
+              },
+              {
+                value: 'crop_tail',
+                label: 'Keep End',
+                desc: 'Trim from start',
+              },
+              {
+                value: 'crop_center',
+                label: 'Keep Center',
+                desc: 'Trim both ends',
+              },
+            ].map((option) => (
+              <button
+                key={option.value}
+                onClick={() => setClipFittingMode(option.value as ClipFittingMode)}
+                className={`
+                  p-3 border-2 text-left transition-all
+                  ${clipFittingMode === option.value
+                    ? 'border-[var(--cyan)] bg-[var(--cyan-soft)]'
+                    : 'border-[var(--ink)] hover:border-[var(--cyan)]'
+                  }
+                `}
+              >
+                <p className={`font-mono text-sm uppercase tracking-wider ${clipFittingMode === option.value ? 'text-[var(--cyan)]' : 'text-[var(--text-primary)]'}`}>
+                  {option.label}
+                </p>
+                <p className="text-xs text-[var(--text-muted)] mt-1">{option.desc}</p>
+              </button>
+            ))}
+          </div>
+
+          {/* Mode explanation */}
+          <div className="mt-4 p-3 bg-[var(--paper-dark)] border-2 border-[var(--ink)] text-xs text-[var(--text-muted)]">
+            {clipFittingMode === 'stretch' && (
+              <p>
+                <span className="text-[var(--cyan)]">Stretch:</span> Adjusts playback speed so the entire video fits the beat duration exactly.
+                All content is preserved, but motion may appear faster or slower than natural.
+              </p>
+            )}
+            {clipFittingMode === 'crop_head' && (
+              <p>
+                <span className="text-[var(--cyan)]">Keep Start:</span> Uses the beginning of each video and trims the excess from the end.
+                Motion stays at natural speed. Best when the important action happens at the start.
+              </p>
+            )}
+            {clipFittingMode === 'crop_tail' && (
+              <p>
+                <span className="text-[var(--cyan)]">Keep End:</span> Uses the ending of each video and trims from the beginning.
+                Motion stays at natural speed. Best when the important action happens at the end.
+              </p>
+            )}
+            {clipFittingMode === 'crop_center' && (
+              <p>
+                <span className="text-[var(--cyan)]">Keep Center:</span> Uses the middle portion and trims equally from both ends.
+                Motion stays at natural speed. Best for balanced compositions.
+              </p>
+            )}
+          </div>
+
+          {/* Visual diagram */}
+          <div className="mt-4 font-mono text-xs">
+            <p className="text-[var(--text-muted)] mb-2">Example: 2.0s video → 0.8s beat</p>
+            <div className="space-y-1 text-[var(--text-secondary)]">
+              <div className="flex items-center gap-2">
+                <span className="w-16">Original:</span>
+                <code className="bg-[var(--ink)] text-[var(--paper)] px-1">████████████████████</code>
+                <span className="text-[var(--text-muted)]">2.0s</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-16">Result:</span>
+                {clipFittingMode === 'stretch' && (
+                  <>
+                    <code className="px-1"><span className="bg-[var(--cyan)] text-[var(--ink)]">████████</span><span className="text-[var(--text-muted)] opacity-30">············</span></code>
+                    <span className="text-[var(--text-muted)]">0.8s (2.5x faster)</span>
+                  </>
+                )}
+                {clipFittingMode === 'crop_head' && (
+                  <>
+                    <code className="px-1"><span className="bg-[var(--cyan)] text-[var(--ink)]">████████</span><span className="text-[var(--text-muted)] opacity-30">············</span></code>
+                    <span className="text-[var(--text-muted)]">0.8s (start kept)</span>
+                  </>
+                )}
+                {clipFittingMode === 'crop_tail' && (
+                  <>
+                    <code className="px-1"><span className="text-[var(--text-muted)] opacity-30">············</span><span className="bg-[var(--cyan)] text-[var(--ink)]">████████</span></code>
+                    <span className="text-[var(--text-muted)]">0.8s (end kept)</span>
+                  </>
+                )}
+                {clipFittingMode === 'crop_center' && (
+                  <>
+                    <code className="px-1"><span className="text-[var(--text-muted)] opacity-30">······</span><span className="bg-[var(--cyan)] text-[var(--ink)]">████████</span><span className="text-[var(--text-muted)] opacity-30">······</span></code>
+                    <span className="text-[var(--text-muted)]">0.8s (center kept)</span>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Speed Change Warnings */}
       {speedWarnings.length > 0 && (
         <Card variant="yellow" className="mb-8 animate-fade-in">
@@ -439,7 +564,7 @@ export function ExportStep() {
                   ))}
                 </ul>
                 <p className="text-xs text-[var(--text-muted)] mt-3">
-                  Tip: Use &quot;Round to Second&quot; or &quot;Padding&quot; frame strategies to reduce speed changes.
+                  Tip: Switch to a Crop mode above to keep natural motion, or use longer frame strategies to reduce speed changes.
                 </p>
               </div>
             </div>

@@ -10,6 +10,7 @@ export type LocalConnectionStatus = 'disconnected' | 'connecting' | 'connected' 
 export type T2IModel = 'flux-klein' | 'z-image';
 export type I2VModel = 'ltx-2' | 'wan-2.2';
 export type WorkflowMode = 'presets' | 'custom';
+export type ClipFittingMode = 'stretch' | 'crop_head' | 'crop_tail' | 'crop_center';
 
 export interface Scene {
   id: string;
@@ -110,6 +111,10 @@ export interface AppState {
   setFrameStrategy: (strategy: FrameStrategy) => void;
   setFramePadding: (padding: number) => void;
 
+  // Clip Fitting (Export)
+  clipFittingMode: ClipFittingMode;
+  setClipFittingMode: (mode: ClipFittingMode) => void;
+
   // Export
   finalVideoUrl: string | null;
   setFinalVideoUrl: (url: string | null) => void;
@@ -149,6 +154,7 @@ const initialState = {
   customI2VFps: (typeof window !== 'undefined' ? Number(localStorage.getItem('custom-i2v-fps')) : 0) || 24,
   frameStrategy: (typeof window !== 'undefined' ? localStorage.getItem('frame-strategy') as FrameStrategy : null) || 'exact',
   framePadding: (typeof window !== 'undefined' ? Number(localStorage.getItem('frame-padding')) : 0) || 0,
+  clipFittingMode: (typeof window !== 'undefined' ? localStorage.getItem('clip-fitting-mode') as ClipFittingMode : null) || 'stretch',
   finalVideoUrl: null,
   isExporting: false,
   exportProgress: 0,
@@ -300,6 +306,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       localStorage.setItem('frame-padding', String(padding));
     }
     set({ framePadding: padding });
+  },
+
+  setClipFittingMode: (mode) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('clip-fitting-mode', mode);
+    }
+    set({ clipFittingMode: mode });
   },
 
   setFinalVideoUrl: (url) => set({ finalVideoUrl: url }),

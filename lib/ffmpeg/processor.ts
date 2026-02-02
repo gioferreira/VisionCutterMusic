@@ -2,6 +2,7 @@
 
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
+import type { ClipFittingMode } from '@/stores/app-store';
 
 let ffmpeg: FFmpeg | null = null;
 
@@ -195,4 +196,112 @@ export function calculateSceneDurationsFromBeats(
   }
 
   return durations;
+}
+
+// =============================================================================
+// Clip Fitting (Trimming Modes)
+// =============================================================================
+
+export interface ClipFittingParams {
+  inputFile: string;
+  outputFile: string;
+  originalDuration: number;
+  targetDuration: number;
+  mode: ClipFittingMode;
+}
+
+/**
+ * Apply clip fitting to adjust video duration to target.
+ *
+ * Modes:
+ * - stretch: Adjust playback speed (setpts filter)
+ * - crop_head: Keep beginning, trim end
+ * - crop_tail: Keep end, trim beginning
+ * - crop_center: Keep middle, trim both ends
+ *
+ * Note: If originalDuration <= targetDuration, always uses stretch
+ * (can't crop to make video longer)
+ */
+export async function applyClipFitting(
+  ffmpeg: FFmpeg,
+  params: ClipFittingParams
+): Promise<void> {
+  const { inputFile, outputFile, originalDuration, targetDuration, mode } = params;
+
+  // If original is shorter or equal to target, always stretch to fill
+  // (crop modes can't extend video duration)
+  if (originalDuration <= targetDuration) {
+    const pts = targetDuration / originalDuration;
+    await ffmpeg.exec([
+      '-i', inputFile,
+      '-filter:v', `setpts=${pts.toFixed(6)}*PTS`,
+      '-t', targetDuration.toFixed(6),
+      '-an',
+      '-y',
+      outputFile,
+    ]);
+    return;
+  }
+
+  // Original > target: apply selected mode
+  switch (mode) {
+    case 'stretch': {
+      // Adjust speed to fit exactly
+      const pts = targetDuration / originalDuration;
+      await ffmpeg.exec([
+        '-i', inputFile,
+        '-filter:v', `setpts=${pts.toFixed(6)}*PTS`,
+        '-t', targetDuration.toFixed(6),
+        '-an',
+        '-y',
+        outputFile,
+      ]);
+      break;
+    }
+
+    case 'crop_head': {
+      // Keep beginning, trim end
+      // Simply limit duration with -t
+      await ffmpeg.exec([
+        '-i', inputFile,
+        '-t', targetDuration.toFixed(6),
+        '-c:v', 'copy', // No re-encode needed for simple trim
+        '-an',
+        '-y',
+        outputFile,
+      ]);
+      break;
+    }
+
+    case 'crop_tail': {
+      // Keep end, trim beginning
+      // Seek to (original - target) then take targetDuration
+      const seekTime = originalDuration - targetDuration;
+      await ffmpeg.exec([
+        '-ss', seekTime.toFixed(6), // Seek before input for fast seeking
+        '-i', inputFile,
+        '-t', targetDuration.toFixed(6),
+        '-c:v', 'copy',
+        '-an',
+        '-y',
+        outputFile,
+      ]);
+      break;
+    }
+
+    case 'crop_center': {
+      // Keep middle, trim both ends equally
+      const trimAmount = (originalDuration - targetDuration) / 2;
+      await ffmpeg.exec([
+        '-ss', trimAmount.toFixed(6),
+        '-i', inputFile,
+        '-t', targetDuration.toFixed(6),
+        '-c:v', 'copy',
+        '-an',
+        '-y',
+        outputFile,
+      ]);
+      break;
+    }
+  }
 }
