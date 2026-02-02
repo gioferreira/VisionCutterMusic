@@ -259,7 +259,30 @@ export function GenerateStep() {
     syncMode,
     t2iModel,
     i2vModel,
+    workflowMode,
+    customT2IMapping,
+    customI2VMapping,
+    customI2VFps,
   } = useAppStore();
+
+  // Load custom workflows from localStorage if in custom mode
+  const customT2IWorkflow = workflowMode === 'custom'
+    ? (() => {
+        try {
+          const json = localStorage.getItem('custom-t2i-workflow');
+          return json ? JSON.parse(json) : null;
+        } catch { return null; }
+      })()
+    : null;
+
+  const customI2VWorkflow = workflowMode === 'custom'
+    ? (() => {
+        try {
+          const json = localStorage.getItem('custom-i2v-workflow');
+          return json ? JSON.parse(json) : null;
+        } catch { return null; }
+      })()
+    : null;
 
   // Build generation config from store state
   const generationConfig: GenerationConfig = {
@@ -269,6 +292,12 @@ export function GenerateStep() {
     aspectRatio,
     t2iModel,
     i2vModel,
+    workflowMode,
+    customT2IWorkflow,
+    customT2IMapping,
+    customI2VWorkflow,
+    customI2VMapping,
+    customI2VFps,
   };
 
   // Get backend-specific cost info
@@ -278,6 +307,10 @@ export function GenerateStep() {
 
   // Check if backend is ready
   const backendReady = isBackendReady(generationConfig);
+
+  // For custom mode, ensure workflows are loaded
+  const customWorkflowsReady = workflowMode === 'presets' ||
+    (backendType === 'local' && customT2IMapping !== null && customI2VMapping !== null);
 
   // Calculate target duration for videos based on sync mode
   const getTargetDuration = (sceneIndex: number): number => {
@@ -510,6 +543,10 @@ export function GenerateStep() {
                 </svg>
                 {backendType === 'fal' ? 'FAL.ai Connected' : 'ComfyUI Ready'}
               </span>
+            ) : !customWorkflowsReady ? (
+              <span className="text-sm text-[var(--red)] font-mono uppercase tracking-wider">
+                Upload both workflows in Audio step
+              </span>
             ) : (
               <span className="text-sm text-[var(--red)] font-mono uppercase tracking-wider">
                 {backendType === 'fal' ? 'Add API key in Audio step' : 'Connect ComfyUI in Audio step'}
@@ -528,7 +565,7 @@ export function GenerateStep() {
             <Button
               variant={backendType === 'fal' ? 'red' : 'orange'}
               onClick={handleGenerateImages}
-              disabled={isGenerating || pendingCount === 0 || !backendReady}
+              disabled={isGenerating || pendingCount === 0 || !backendReady || !customWorkflowsReady}
               isLoading={isGenerating}
               className="gap-2"
             >
@@ -540,7 +577,7 @@ export function GenerateStep() {
 
             <Button
               onClick={handleGenerateVideos}
-              disabled={isGenerating || imageReadyCount === 0 || !backendReady}
+              disabled={isGenerating || imageReadyCount === 0 || !backendReady || !customWorkflowsReady}
               isLoading={isGenerating}
               variant="cyan"
               className="gap-2"
@@ -601,7 +638,10 @@ export function GenerateStep() {
                 <div>
                   <p className="font-display text-sm uppercase tracking-wider text-[var(--ink)]">Self-Hosted ComfyUI</p>
                   <p className="text-xs text-[var(--text-muted)]">
-                    {t2iModel === 'flux-klein' ? 'FLUX 2 Klein' : 'Z-Image'} (T2I) + {i2vModel === 'ltx-2' ? 'LTX-2' : 'Wan2.2'} (I2V)
+                    {workflowMode === 'custom'
+                      ? 'Custom workflows (BYOW)'
+                      : `${t2iModel === 'flux-klein' ? 'FLUX 2 Klein' : 'Z-Image'} (T2I) + ${i2vModel === 'ltx-2' ? 'LTX-2' : 'Wan2.2'} (I2V)`
+                    }
                   </p>
                 </div>
               </div>

@@ -141,3 +141,87 @@ export interface ComfyUIVideoOutput {
   subfolder: string;
   type: string;
 }
+
+// =============================================================================
+// Custom Workflow (BYOW) Types
+// =============================================================================
+
+/**
+ * Valid node title keywords for custom workflows (case-insensitive, after "VC - " prefix)
+ */
+export type T2INodeTitle =
+  | 'pos prompt'
+  | 'prompt'
+  | 'neg prompt'
+  | 'negative'
+  | 'seed'
+  | 'width'
+  | 'height';
+
+export type I2VNodeTitle =
+  | 'input image'
+  | 'image'
+  | 'motion prompt'
+  | 'prompt'
+  | 'neg prompt'
+  | 'negative'
+  | 'seed'
+  | 'frames'
+  | 'frame count'
+  | 'length'
+  | 'fps';
+
+/**
+ * Mapping from logical parameter to node ID and input key
+ */
+export interface NodeMapping {
+  nodeId: string;
+  inputKey: string;
+  nodeType: string; // class_type for debugging
+}
+
+/**
+ * Parsed node mappings for T2I workflow
+ */
+export interface T2IWorkflowMapping {
+  positivePrompt: NodeMapping | null;
+  negativePrompt: NodeMapping | null;
+  seed: NodeMapping | null;
+  width: NodeMapping | null;
+  height: NodeMapping | null;
+}
+
+/**
+ * Parsed node mappings for I2V workflow
+ */
+export interface I2VWorkflowMapping {
+  inputImage: NodeMapping | null;
+  motionPrompt: NodeMapping | null;
+  negativePrompt: NodeMapping | null;
+  seed: NodeMapping | null;
+  frames: NodeMapping | null;
+  fps: NodeMapping | null; // Optional - user can override
+  width: NodeMapping | null; // Optional - some workflows have dimension controls
+  height: NodeMapping | null; // Optional - some workflows have dimension controls
+}
+
+/**
+ * Result of workflow parsing/validation
+ */
+export interface WorkflowValidationResult {
+  isValid: boolean;
+  isApiFormat: boolean;
+  mapping: T2IWorkflowMapping | I2VWorkflowMapping | null;
+  errors: string[];
+  warnings: string[];
+  foundNodes: string[]; // List of found VC - prefixed nodes
+}
+
+/**
+ * Custom workflow configuration stored in app state
+ */
+export interface CustomWorkflowConfig {
+  t2iMapping: T2IWorkflowMapping | null;
+  i2vMapping: I2VWorkflowMapping | null;
+  i2vFps: number; // User-specified or detected from workflow
+}

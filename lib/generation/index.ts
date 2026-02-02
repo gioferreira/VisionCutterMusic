@@ -1,10 +1,16 @@
 'use client';
 
-import type { AspectRatio, BackendType, T2IModel, I2VModel } from '@/stores/app-store';
+import type { AspectRatio, BackendType, T2IModel, I2VModel, WorkflowMode } from '@/stores/app-store';
 import { initFalClient, generateImage as falGenerateImage, generateVideo as falGenerateVideo } from '@/lib/fal/client';
 import { getComfyUIClient, initComfyUIClient } from '@/lib/comfyui/client';
-import { hydrateT2IWorkflow, hydrateI2VWorkflow } from '@/lib/comfyui/workflows';
-import type { GenerationProgress } from '@/lib/comfyui/types';
+import {
+  hydrateT2IWorkflow,
+  hydrateI2VWorkflow,
+  hydrateCustomT2IWorkflow,
+  hydrateCustomI2VWorkflow,
+  getImageDimensions,
+} from '@/lib/comfyui/workflows';
+import type { GenerationProgress, ComfyUIWorkflow, T2IWorkflowMapping, I2VWorkflowMapping } from '@/lib/comfyui/types';
 
 export interface GenerationConfig {
   backendType: BackendType;
@@ -13,6 +19,13 @@ export interface GenerationConfig {
   aspectRatio: AspectRatio;
   t2iModel?: T2IModel;
   i2vModel?: I2VModel;
+  // BYOW additions
+  workflowMode?: WorkflowMode;
+  customT2IWorkflow?: ComfyUIWorkflow | null;
+  customT2IMapping?: T2IWorkflowMapping | null;
+  customI2VWorkflow?: ComfyUIWorkflow | null;
+  customI2VMapping?: I2VWorkflowMapping | null;
+  customI2VFps?: number;
 }
 
 export interface T2IResult {
@@ -123,12 +136,28 @@ async function generateImageWithComfyUI(
     await client.connect();
   }
 
-  // Hydrate the T2I workflow with our parameters
-  const workflow = hydrateT2IWorkflow({
-    prompt,
-    aspectRatio: config.aspectRatio,
-    model: config.t2iModel || 'flux-klein',
-  });
+  // Hydrate the workflow based on mode
+  let workflow: ComfyUIWorkflow;
+
+  if (config.workflowMode === 'custom' && config.customT2IWorkflow && config.customT2IMapping) {
+    const { width, height } = getImageDimensions(config.aspectRatio);
+    workflow = hydrateCustomT2IWorkflow({
+      prompt,
+      negativePrompt: 'blurry, low quality, distorted, watermark',
+      width,
+      height,
+      workflow: config.customT2IWorkflow,
+      mapping: config.customT2IMapping,
+    });
+    console.log('[ComfyUI] Using custom T2I workflow');
+  } else {
+    workflow = hydrateT2IWorkflow({
+      prompt,
+      aspectRatio: config.aspectRatio,
+      model: config.t2iModel || 'flux-klein',
+    });
+    console.log('[ComfyUI] Using preset T2I workflow:', config.t2iModel || 'flux-klein');
+  }
 
   console.log('[ComfyUI] Queuing T2I prompt...');
 
@@ -199,18 +228,37 @@ async function generateVideoWithComfyUI(
   const uploadResult = await client.uploadImage(imageBlob, filename, '', true);
   console.log('[ComfyUI] Image uploaded:', JSON.stringify(uploadResult));
 
-  // Hydrate the I2V workflow with our parameters
-  const i2vParams = {
-    inputImageFilename: uploadResult.name,
-    motionPrompt,
-    targetDuration,
-    model: config.i2vModel || 'ltx-2',
-    aspectRatio: config.aspectRatio,
-  };
-  console.log('[ComfyUI] I2V params:', i2vParams);
+  // Hydrate the workflow based on mode
+  let workflow: ComfyUIWorkflow;
 
-  const workflow = hydrateI2VWorkflow(i2vParams);
-  console.log('[ComfyUI] I2V workflow LoadImage node:', workflow['98']?.inputs);
+  if (config.workflowMode === 'custom' && config.customI2VWorkflow && config.customI2VMapping) {
+    const fps = config.customI2VFps || 24;
+    const frames = Math.round(targetDuration * fps) + 1;
+    const { width, height } = getImageDimensions(config.aspectRatio);
+
+    workflow = hydrateCustomI2VWorkflow({
+      inputImageFilename: uploadResult.name,
+      motionPrompt,
+      negativePrompt: 'blurry, distorted, low quality',
+      frames,
+      width,
+      height,
+      workflow: config.customI2VWorkflow,
+      mapping: config.customI2VMapping,
+    });
+    console.log(`[ComfyUI] Using custom I2V workflow: ${targetDuration}s -> ${frames} frames @ ${fps}fps`);
+  } else {
+    const i2vParams = {
+      inputImageFilename: uploadResult.name,
+      motionPrompt,
+      targetDuration,
+      model: config.i2vModel || 'ltx-2',
+      aspectRatio: config.aspectRatio,
+    };
+    console.log('[ComfyUI] I2V params:', i2vParams);
+    workflow = hydrateI2VWorkflow(i2vParams);
+    console.log('[ComfyUI] Using preset I2V workflow:', config.i2vModel || 'ltx-2');
+  }
 
   console.log('[ComfyUI] Queuing I2V prompt...');
 

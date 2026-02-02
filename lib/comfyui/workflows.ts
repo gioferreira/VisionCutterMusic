@@ -1,6 +1,6 @@
 'use client';
 
-import type { ComfyUIWorkflow } from './types';
+import type { ComfyUIWorkflow, T2IWorkflowMapping, I2VWorkflowMapping } from './types';
 import type { AspectRatio, T2IModel, I2VModel } from '@/stores/app-store';
 
 // Import all workflow templates
@@ -320,6 +320,150 @@ function hydrateI2VWan22(
       const { width, height } = getImageDimensions(aspectRatio);
       workflow[nodes.VIDEO_CONFIG].inputs.width = width;
       workflow[nodes.VIDEO_CONFIG].inputs.height = height;
+    }
+  }
+
+  return workflow;
+}
+
+// =============================================================================
+// Custom Workflow Hydration (BYOW)
+// =============================================================================
+
+export interface CustomT2IParams {
+  prompt: string;
+  negativePrompt?: string;
+  seed?: number;
+  width: number;
+  height: number;
+  workflow: ComfyUIWorkflow;
+  mapping: T2IWorkflowMapping;
+}
+
+export interface CustomI2VParams {
+  inputImageFilename: string;
+  motionPrompt: string;
+  negativePrompt?: string;
+  seed?: number;
+  frames: number;
+  width?: number;
+  height?: number;
+  workflow: ComfyUIWorkflow;
+  mapping: I2VWorkflowMapping;
+}
+
+/**
+ * Hydrate a custom T2I workflow with dynamic parameters
+ */
+export function hydrateCustomT2IWorkflow(params: CustomT2IParams): ComfyUIWorkflow {
+  const workflow = JSON.parse(JSON.stringify(params.workflow)) as ComfyUIWorkflow;
+  const mapping = params.mapping;
+  const seed = params.seed ?? Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+
+  // Set positive prompt
+  if (mapping.positivePrompt) {
+    const node = workflow[mapping.positivePrompt.nodeId];
+    if (node) {
+      node.inputs[mapping.positivePrompt.inputKey] = params.prompt;
+    }
+  }
+
+  // Set negative prompt
+  if (mapping.negativePrompt && params.negativePrompt) {
+    const node = workflow[mapping.negativePrompt.nodeId];
+    if (node) {
+      node.inputs[mapping.negativePrompt.inputKey] = params.negativePrompt;
+    }
+  }
+
+  // Set seed
+  if (mapping.seed) {
+    const node = workflow[mapping.seed.nodeId];
+    if (node) {
+      node.inputs[mapping.seed.inputKey] = seed;
+    }
+  }
+
+  // Set width
+  if (mapping.width) {
+    const node = workflow[mapping.width.nodeId];
+    if (node) {
+      node.inputs[mapping.width.inputKey] = params.width;
+    }
+  }
+
+  // Set height
+  if (mapping.height) {
+    const node = workflow[mapping.height.nodeId];
+    if (node) {
+      node.inputs[mapping.height.inputKey] = params.height;
+    }
+  }
+
+  return workflow;
+}
+
+/**
+ * Hydrate a custom I2V workflow with dynamic parameters
+ */
+export function hydrateCustomI2VWorkflow(params: CustomI2VParams): ComfyUIWorkflow {
+  const workflow = JSON.parse(JSON.stringify(params.workflow)) as ComfyUIWorkflow;
+  const mapping = params.mapping;
+  const seed = params.seed ?? Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+
+  // Set input image
+  if (mapping.inputImage) {
+    const node = workflow[mapping.inputImage.nodeId];
+    if (node) {
+      node.inputs[mapping.inputImage.inputKey] = params.inputImageFilename;
+    }
+  }
+
+  // Set motion prompt
+  if (mapping.motionPrompt) {
+    const node = workflow[mapping.motionPrompt.nodeId];
+    if (node) {
+      node.inputs[mapping.motionPrompt.inputKey] = params.motionPrompt;
+    }
+  }
+
+  // Set negative prompt
+  if (mapping.negativePrompt && params.negativePrompt) {
+    const node = workflow[mapping.negativePrompt.nodeId];
+    if (node) {
+      node.inputs[mapping.negativePrompt.inputKey] = params.negativePrompt;
+    }
+  }
+
+  // Set seed
+  if (mapping.seed) {
+    const node = workflow[mapping.seed.nodeId];
+    if (node) {
+      node.inputs[mapping.seed.inputKey] = seed;
+    }
+  }
+
+  // Set frame count
+  if (mapping.frames) {
+    const node = workflow[mapping.frames.nodeId];
+    if (node) {
+      node.inputs[mapping.frames.inputKey] = params.frames;
+    }
+  }
+
+  // Set width
+  if (mapping.width && params.width) {
+    const node = workflow[mapping.width.nodeId];
+    if (node) {
+      node.inputs[mapping.width.inputKey] = params.width;
+    }
+  }
+
+  // Set height
+  if (mapping.height && params.height) {
+    const node = workflow[mapping.height.nodeId];
+    if (node) {
+      node.inputs[mapping.height.inputKey] = params.height;
     }
   }
 

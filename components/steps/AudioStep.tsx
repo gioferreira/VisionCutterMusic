@@ -4,8 +4,9 @@ import { useCallback, useState, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { useAppStore } from '@/stores/app-store';
 import { detectBpm, trackBeats, getAudioBufferFromFile, getAudioDuration } from '@/lib/audio/bpm-detector';
-import type { SyncMode, BackendType, T2IModel, I2VModel } from '@/stores/app-store';
+import type { SyncMode, BackendType, T2IModel, I2VModel, WorkflowMode } from '@/stores/app-store';
 import { formatDuration, formatFileSize } from '@/lib/utils/helpers';
+import { WorkflowUpload } from './WorkflowUpload';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { initFalClient } from '@/lib/fal/client';
@@ -41,6 +42,10 @@ export function AudioStep() {
     i2vModel,
     setT2IModel,
     setI2VModel,
+    workflowMode,
+    setWorkflowMode,
+    customT2IMapping,
+    customI2VMapping,
   } = useAppStore();
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -736,47 +741,140 @@ export function AudioStep() {
                 </div>
               )}
 
-              {/* Model Selection */}
+              {/* Workflow Source Selection */}
               <div className="mt-6 pt-6 border-t-2 border-[var(--ink)]">
                 <h4 className="font-mono text-sm uppercase tracking-wider text-[var(--text-secondary)] mb-4">
-                  Model Selection
+                  Workflow Source
                 </h4>
 
-                <div className="grid grid-cols-2 gap-4">
-                  {/* T2I Model Selector */}
-                  <div>
-                    <label className="block text-xs font-mono uppercase tracking-wider text-[var(--text-muted)] mb-2">
-                      Text-to-Image
-                    </label>
-                    <select
-                      value={t2iModel}
-                      onChange={(e) => setT2IModel(e.target.value as T2IModel)}
-                      className="w-full px-3 py-2 border-2 border-[var(--ink)] bg-[var(--paper)] text-[var(--text-primary)] font-mono text-sm focus:outline-none focus:border-[var(--orange)] cursor-pointer"
-                    >
-                      <option value="flux-klein">FLUX 2 Klein</option>
-                      <option value="z-image">Z-Image</option>
-                    </select>
-                  </div>
+                <div className="grid grid-cols-2 gap-3 mb-6">
+                  <button
+                    onClick={() => setWorkflowMode('presets')}
+                    className={`
+                      p-3 border-2 text-left transition-all
+                      ${workflowMode === 'presets'
+                        ? 'border-[var(--cyan)] bg-[var(--cyan-soft)]'
+                        : 'border-[var(--ink)] hover:border-[var(--cyan)]'
+                      }
+                    `}
+                  >
+                    <p className={`font-mono text-sm uppercase tracking-wider ${workflowMode === 'presets' ? 'text-[var(--cyan)]' : 'text-[var(--text-primary)]'}`}>
+                      Presets
+                    </p>
+                    <p className="text-xs text-[var(--text-muted)] mt-1">
+                      Built-in workflows
+                    </p>
+                  </button>
 
-                  {/* I2V Model Selector */}
-                  <div>
-                    <label className="block text-xs font-mono uppercase tracking-wider text-[var(--text-muted)] mb-2">
-                      Image-to-Video
-                    </label>
-                    <select
-                      value={i2vModel}
-                      onChange={(e) => setI2VModel(e.target.value as I2VModel)}
-                      className="w-full px-3 py-2 border-2 border-[var(--ink)] bg-[var(--paper)] text-[var(--text-primary)] font-mono text-sm focus:outline-none focus:border-[var(--orange)] cursor-pointer"
-                    >
-                      <option value="ltx-2">LTX-2 (25fps)</option>
-                      <option value="wan-2.2">Wan2.2 (16fps)</option>
-                    </select>
-                  </div>
+                  <button
+                    onClick={() => setWorkflowMode('custom')}
+                    className={`
+                      p-3 border-2 text-left transition-all
+                      ${workflowMode === 'custom'
+                        ? 'border-[var(--orange)] bg-[var(--orange-soft)]'
+                        : 'border-[var(--ink)] hover:border-[var(--orange)]'
+                      }
+                    `}
+                  >
+                    <p className={`font-mono text-sm uppercase tracking-wider ${workflowMode === 'custom' ? 'text-[var(--orange)]' : 'text-[var(--text-primary)]'}`}>
+                      Custom (BYOW)
+                    </p>
+                    <p className="text-xs text-[var(--text-muted)] mt-1">
+                      Your own workflows
+                    </p>
+                  </button>
                 </div>
 
-                <p className="text-xs text-[var(--text-muted)] mt-3">
-                  Selected models must be installed in your ComfyUI instance.
-                </p>
+                {/* Preset Model Selection */}
+                {workflowMode === 'presets' && (
+                  <div className="space-y-4">
+                    <h5 className="font-mono text-xs uppercase tracking-wider text-[var(--text-muted)]">
+                      Model Selection
+                    </h5>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      {/* T2I Model Selector */}
+                      <div>
+                        <label className="block text-xs font-mono uppercase tracking-wider text-[var(--text-muted)] mb-2">
+                          Text-to-Image
+                        </label>
+                        <select
+                          value={t2iModel}
+                          onChange={(e) => setT2IModel(e.target.value as T2IModel)}
+                          className="w-full px-3 py-2 border-2 border-[var(--ink)] bg-[var(--paper)] text-[var(--text-primary)] font-mono text-sm focus:outline-none focus:border-[var(--orange)] cursor-pointer"
+                        >
+                          <option value="flux-klein">FLUX 2 Klein</option>
+                          <option value="z-image">Z-Image</option>
+                        </select>
+                      </div>
+
+                      {/* I2V Model Selector */}
+                      <div>
+                        <label className="block text-xs font-mono uppercase tracking-wider text-[var(--text-muted)] mb-2">
+                          Image-to-Video
+                        </label>
+                        <select
+                          value={i2vModel}
+                          onChange={(e) => setI2VModel(e.target.value as I2VModel)}
+                          className="w-full px-3 py-2 border-2 border-[var(--ink)] bg-[var(--paper)] text-[var(--text-primary)] font-mono text-sm focus:outline-none focus:border-[var(--orange)] cursor-pointer"
+                        >
+                          <option value="ltx-2">LTX-2 (25fps)</option>
+                          <option value="wan-2.2">Wan2.2 (16fps)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-[var(--text-muted)]">
+                      Selected models must be installed in your ComfyUI instance.
+                    </p>
+                  </div>
+                )}
+
+                {/* Custom Workflow Upload */}
+                {workflowMode === 'custom' && (
+                  <div className="space-y-6">
+                    <WorkflowUpload type="t2i" />
+                    <WorkflowUpload type="i2v" />
+
+                    {/* Help section */}
+                    <details className="text-xs">
+                      <summary className="font-mono uppercase tracking-wider text-[var(--text-muted)] cursor-pointer hover:text-[var(--text-secondary)]">
+                        How to prepare your workflow
+                      </summary>
+                      <div className="mt-3 p-3 border-2 border-[var(--ink)] bg-[var(--paper-dark)] space-y-2 text-[var(--text-secondary)]">
+                        <p><strong>1.</strong> In ComfyUI settings, enable &quot;Dev mode Options&quot;</p>
+                        <p><strong>2.</strong> Right-click nodes and rename them with <code className="text-[var(--cyan)]">VC - </code> prefix:</p>
+                        <ul className="list-disc list-inside ml-2 space-y-1 text-[var(--text-muted)]">
+                          <li><code>VC - Pos Prompt</code> (text input)</li>
+                          <li><code>VC - Neg Prompt</code> (optional)</li>
+                          <li><code>VC - Seed</code> (required)</li>
+                          <li><code>VC - Width</code>, <code>VC - Height</code> (optional)</li>
+                          <li><code>VC - Input Image</code> (I2V only)</li>
+                          <li><code>VC - Frames</code> (I2V, optional)</li>
+                          <li><code>VC - FPS</code> (I2V, optional)</li>
+                        </ul>
+                        <p><strong>3.</strong> Click <code className="text-[var(--orange)]">Save (API Format)</code></p>
+                      </div>
+                    </details>
+
+                    {/* Validation summary */}
+                    {(customT2IMapping || customI2VMapping) && (
+                      <div className="p-3 border-2 border-[var(--ink)] bg-[var(--paper-dark)]">
+                        <p className="font-mono text-xs uppercase tracking-wider text-[var(--text-muted)] mb-2">
+                          Workflow Status
+                        </p>
+                        <div className="flex gap-4">
+                          <span className={`text-sm ${customT2IMapping ? 'text-[var(--cyan)]' : 'text-[var(--text-muted)]'}`}>
+                            {customT2IMapping ? 'v' : 'o'} T2I
+                          </span>
+                          <span className={`text-sm ${customI2VMapping ? 'text-[var(--cyan)]' : 'text-[var(--text-muted)]'}`}>
+                            {customI2VMapping ? 'v' : 'o'} I2V
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* ComfyUI Setup Info */}

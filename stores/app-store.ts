@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { T2IWorkflowMapping, I2VWorkflowMapping } from '@/lib/comfyui/types';
 
 export type Step = 'audio' | 'style' | 'story' | 'generate' | 'export';
 export type AspectRatio = '16:9' | '1:1' | '9:16';
@@ -8,6 +9,7 @@ export type BackendType = 'fal' | 'local';
 export type LocalConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 export type T2IModel = 'flux-klein' | 'z-image';
 export type I2VModel = 'ltx-2' | 'wan-2.2';
+export type WorkflowMode = 'presets' | 'custom';
 
 export interface Scene {
   id: string;
@@ -91,6 +93,16 @@ export interface AppState {
   setT2IModel: (model: T2IModel) => void;
   setI2VModel: (model: I2VModel) => void;
 
+  // Custom Workflow (BYOW)
+  workflowMode: WorkflowMode;
+  customT2IMapping: T2IWorkflowMapping | null;
+  customI2VMapping: I2VWorkflowMapping | null;
+  customI2VFps: number;
+  setWorkflowMode: (mode: WorkflowMode) => void;
+  setCustomT2IMapping: (mapping: T2IWorkflowMapping | null) => void;
+  setCustomI2VMapping: (mapping: I2VWorkflowMapping | null) => void;
+  setCustomI2VFps: (fps: number) => void;
+
   // Export
   finalVideoUrl: string | null;
   setFinalVideoUrl: (url: string | null) => void;
@@ -124,6 +136,10 @@ const initialState = {
   localConnectionStatus: 'disconnected' as LocalConnectionStatus,
   t2iModel: (typeof window !== 'undefined' ? localStorage.getItem('t2i-model') as T2IModel : null) || 'flux-klein',
   i2vModel: (typeof window !== 'undefined' ? localStorage.getItem('i2v-model') as I2VModel : null) || 'ltx-2',
+  workflowMode: (typeof window !== 'undefined' ? localStorage.getItem('workflow-mode') as WorkflowMode : null) || 'presets',
+  customT2IMapping: null,
+  customI2VMapping: null,
+  customI2VFps: (typeof window !== 'undefined' ? Number(localStorage.getItem('custom-i2v-fps')) : 0) || 24,
   finalVideoUrl: null,
   isExporting: false,
   exportProgress: 0,
@@ -239,6 +255,28 @@ export const useAppStore = create<AppState>((set, get) => ({
       localStorage.setItem('i2v-model', model);
     }
     set({ i2vModel: model });
+  },
+
+  setWorkflowMode: (mode) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('workflow-mode', mode);
+    }
+    set({ workflowMode: mode });
+  },
+
+  setCustomT2IMapping: (mapping) => {
+    set({ customT2IMapping: mapping });
+  },
+
+  setCustomI2VMapping: (mapping) => {
+    set({ customI2VMapping: mapping });
+  },
+
+  setCustomI2VFps: (fps) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('custom-i2v-fps', String(fps));
+    }
+    set({ customI2VFps: fps });
   },
 
   setFinalVideoUrl: (url) => set({ finalVideoUrl: url }),
